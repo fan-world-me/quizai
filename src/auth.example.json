@@ -1,0 +1,9 @@
+{
+  "geminiKeys": [
+    "AIzaSyYourFirstGeminiKey",
+    "AIzaSyYourSecondGeminiKey"
+  ],
+  "groqKeys": [
+    "gsk_your_groq_key"
+  ]
+}
