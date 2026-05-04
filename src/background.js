@@ -279,7 +279,10 @@ async function handleCapture(sender, sendResponse) {
 
     sendResponse({ base64: dataUrl.replace(/^data:image\/\w+;base64,/, '') });
   } catch (err) {
-    sendResponse({ error: `Capture failed: ${err.message}` });
+    sendResponse({
+      error: `Capture failed: ${err.message}`,
+      needsLocalCapture: true
+    });
   }
 }
 
