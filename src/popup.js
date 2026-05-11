@@ -1,8 +1,14 @@
+// Quiz AI Analyzer - Popup Script
+// Author: fan_world_me
 document.addEventListener('DOMContentLoaded', () => {
+  const DEFAULT_PROVIDERS = ['gemini', 'openrouter', 'nvidia', 'groq'];
   const enabledToggle = document.getElementById('enabledToggle');
   const analyzeBtn = document.getElementById('analyzeBtn');
   const clearBtn = document.getElementById('clearBtn');
   const howtoBtn = document.getElementById('howtoBtn');
+  const testConnectionBtn = document.getElementById('testConnectionBtn');
+  const resetProvidersBtn = document.getElementById('resetProvidersBtn');
+  const providerToggles = Array.from(document.querySelectorAll('[data-provider-toggle]'));
   const statusBar = document.getElementById('statusBar');
   const statusText = document.getElementById('statusText');
   const statusSublabel = document.getElementById('statusSublabel');
@@ -17,6 +23,36 @@ document.addEventListener('DOMContentLoaded', () => {
   const hasScripting = !!chrome.scripting;
   const isAndroid = /Android/i.test(navigator.userAgent);
 
+  function normalizeProviders(value) {
+    const list = Array.isArray(value) ? value : DEFAULT_PROVIDERS;
+    const filtered = list.filter((provider) => DEFAULT_PROVIDERS.includes(provider));
+    return filtered.length ? [...new Set(filtered)] : [...DEFAULT_PROVIDERS];
+  }
+
+  function getSelectedProviders() {
+    return providerToggles.filter((input) => input.checked).map((input) => input.value);
+  }
+
+  function setProviderToggles(providers) {
+    const enabled = normalizeProviders(providers);
+    providerToggles.forEach((input) => {
+      input.checked = enabled.includes(input.value);
+    });
+  }
+
+  function saveProviders(providers) {
+    const normalized = normalizeProviders(providers);
+    setProviderToggles(normalized);
+    chrome.storage.sync.set({ enabledProviders: normalized }, () => {
+      showStatus('Провайдери оновлено', 'ok');
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const tab = tabs && tabs[0];
+        if (tab && tab.id) chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_CHANGED', enabled: enabledToggle.checked }, () => {});
+      });
+      loadSettings();
+    });
+  }
+
   function applySettings(settings) {
     const enabled = !!(settings && settings.enabled);
     enabledToggle.checked = enabled;
@@ -27,11 +63,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (engineDetailValue) engineDetailValue.textContent = statusLabel;
     usageValue.textContent = settings?.usage?.remainingText || 'Немає даних';
     usageReset.textContent = settings?.usage?.resetText || 'очікує запит';
-    if (fallbackValue) fallbackValue.textContent = settings?.fallbackLabel || 'Gemini 2.5 -> Gemini 2 -> Groq';
+    if (fallbackValue) fallbackValue.textContent = settings?.fallbackLabel || 'Gemini -> OpenRouter -> NVIDIA -> Groq';
+    setProviderToggles(settings?.enabledProviders || DEFAULT_PROVIDERS);
     if (keyCountValue) {
+      const nvidiaCount = settings?.keyCounts?.nvidia ?? '-';
+      const openrouterCount = settings?.keyCounts?.openrouter ?? '-';
       const geminiCount = settings?.keyCounts?.gemini ?? '-';
       const groqCount = settings?.keyCounts?.groq ?? '-';
-      keyCountValue.textContent = `Gemini: ${geminiCount} | Groq: ${groqCount}`;
+      keyCountValue.textContent = `NVIDIA: ${nvidiaCount} | OpenRouter: ${openrouterCount} | Gemini: ${geminiCount} | Groq: ${groqCount}`;
     }
     if (attemptTraceValue) {
       const attempts = Array.isArray(settings?.lastAttemptTrace) ? settings.lastAttemptTrace : [];
@@ -40,14 +79,26 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function loadSettings() {
-    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (settings) => applySettings(settings || {}));
+    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (settings) => {
+      if (chrome.runtime.lastError) {
+        console.warn('GET_SETTINGS error:', chrome.runtime.lastError.message);
+        return;
+      }
+      applySettings(settings || {});
+    });
   }
 
   loadSettings();
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'sync' || !changes.enabled) return;
-    loadSettings();
+    if (area !== 'sync') return;
+    if (changes.enabled || changes.enabledProviders) loadSettings();
   });
+
+  providerToggles.forEach((input) => {
+    input.addEventListener('change', () => saveProviders(getSelectedProviders()));
+  });
+
+  resetProvidersBtn.addEventListener('click', () => saveProviders(DEFAULT_PROVIDERS));
 
   enabledToggle.addEventListener('change', () => {
     const enabled = enabledToggle.checked;
@@ -140,4 +191,31 @@ document.addEventListener('DOMContentLoaded', () => {
       statusBar.className = 'status';
     }, 4000);
   }
+
+  testConnectionBtn.addEventListener('click', () => {
+    testConnectionBtn.textContent = 'Перевіряю...';
+    testConnectionBtn.disabled = true;
+    const startTime = Date.now();
+
+    chrome.runtime.sendMessage({ type: 'TEST_CONNECTION' }, (response) => {
+      if (chrome.runtime.lastError) {
+        console.warn('TEST_CONNECTION error:', chrome.runtime.lastError.message);
+        testConnectionBtn.disabled = false;
+        testConnectionBtn.textContent = "Перевірити з'єднання";
+        showStatus("Помилка з'єднання", 'err');
+        return;
+      }
+
+      const elapsed = Date.now() - startTime;
+      testConnectionBtn.disabled = false;
+      testConnectionBtn.textContent = "Перевірити з'єднання";
+
+      if (response && !response.error) {
+        showStatus(`З'єднано: ${response.provider || 'OK'} (${elapsed}ms)`, 'ok');
+      } else {
+        showStatus(`Помилка: ${response?.error || "Немає з'єднання"}`, 'err');
+      }
+      loadSettings();
+    });
+  });
 });

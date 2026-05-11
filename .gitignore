@@ -1,3 +1,28 @@
 dist/
-src/auth.json
 *.zip
+*.crx
+*.xpi
+
+# Local secrets
+src/auth.json
+
+# Local tool/config folders
+.claude/
+.vscode/
+.idea/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+*.log
+
+# Dependencies/caches if tooling is added later
+node_modules/
+.cache/
+
+# Custom user fonts are ignored, but keep the bundled app font.
+src/*.ttf
+src/*.otf
+src/*.woff
+src/*.woff2
+!src/Monocraft.ttf

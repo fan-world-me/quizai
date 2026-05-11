@@ -3,118 +3,39 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Як користуватися — Quiz AI Analyzer</title>
-  <style>
-    :root{
-      --bg:#f4f8ff;
-      --panel:#ffffff;
-      --line:#dbe6ff;
-      --text:#172033;
-      --muted:#667085;
-      --blue:#1a73e8;
-      --blue-dark:#0b57d0;
-      --blue-soft:#eef4ff;
-      --warn-bg:#fff7e6;
-      --warn-line:#f4b740;
-      --shadow:0 18px 40px rgba(13, 34, 71, 0.12);
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      font:15px/1.6 "Segoe UI",system-ui,sans-serif;
-      color:var(--text);
-      background:linear-gradient(180deg,#eef5ff 0%,#f9fbff 100%);
-      padding:32px 18px 48px;
-    }
-    .wrap{max-width:860px;margin:0 auto}
-    .hero{
-      background:linear-gradient(135deg,#1a73e8,#0b3d91);
-      color:#fff;
-      border-radius:24px;
-      padding:26px 24px;
-      box-shadow:var(--shadow);
-      margin-bottom:18px;
-    }
-    .hero h1{margin:0 0 8px;font-size:30px;line-height:1.1}
-    .hero p{margin:0;max-width:680px;opacity:.92}
-    .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-    .chip{
-      display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;
-      background:rgba(255,255,255,.16);font-size:12px;font-weight:700
-    }
-    .step{
-      display:grid;
-      grid-template-columns:46px 1fr;
-      gap:16px;
-      background:var(--panel);
-      border:1px solid var(--line);
-      border-radius:20px;
-      padding:18px;
-      margin-bottom:14px;
-      box-shadow:var(--shadow);
-    }
-    .num{
-      width:46px;height:46px;border-radius:50%;
-      display:grid;place-items:center;
-      background:var(--blue);color:#fff;font-weight:800;font-size:18px;
-    }
-    h2{margin:0 0 6px;font-size:18px;line-height:1.25}
-    p{margin:0;color:#3a4556}
-    ul{margin:8px 0 0 18px;color:#3a4556}
-    li{margin:4px 0}
-    code{
-      background:var(--blue-soft);
-      color:#123a75;
-      border-radius:8px;
-      padding:2px 7px;
-      font:600 13px Consolas,monospace;
-    }
-    a{color:var(--blue-dark);text-decoration:none}
-    .note{
-      background:var(--warn-bg);
-      border:1px solid #f8d27e;
-      border-left:6px solid var(--warn-line);
-      border-radius:18px;
-      padding:16px 18px;
-      margin-top:16px;
-      box-shadow:var(--shadow);
-    }
-    .note strong{color:#9a6200}
-    @media (max-width:640px){
-      .hero{padding:22px 18px}
-      .hero h1{font-size:26px}
-      .step{grid-template-columns:1fr;gap:12px}
-    }
-  </style>
+  <title>Довідка - Quiz AI Analyzer</title>
+  <link rel="stylesheet" href="howto.css">
 </head>
 <body>
   <div class="wrap">
     <section class="hero">
-      <h1>🧠 Quiz AI Analyzer</h1>
-      <p>Розширення для швидкого аналізу тестів, виділення правильної відповіді та розпізнавання питань зі скриншота.</p>
+      <h1>Quiz AI Analyzer</h1>
+      <p>Розширення для аналізу тестів, шкільних питань і виділених областей екрана. Працює з кількома AI-провайдерами та автоматично перемикається між ними.</p>
       <div class="chips">
-        <span class="chip">Fallback: Gemini 2.5 → Gemini 2 → Groq</span>
-        <span class="chip">Автоаналіз: раз на 10 сек</span>
-        <span class="chip">Працює через popup і плаваючу панель</span>
+        <span class="chip">Default: Gemini -> OpenRouter -> NVIDIA -> Groq</span>
+        <span class="chip">Користувач може вимикати провайдерів</span>
+        <span class="chip">Monocraft UI</span>
       </div>
     </section>
 
     <section class="step">
       <div class="num">1</div>
       <div>
-        <h2>Відкрий розширення</h2>
-        <p>Натисни на іконку розширення в браузері. У popup видно версію, поточний движок, залишок запитів і порядок fallback.</p>
+        <h2>Додай API ключі</h2>
+        <p>Створи <code>src/auth.json</code> з прикладу <code>src/auth.example.json</code> або введи ключі через інтерфейс розширення. Локальний <code>auth.json</code> не додається в git.</p>
       </div>
     </section>
 
     <section class="step">
       <div class="num">2</div>
       <div>
-        <h2>Увімкни автоаналіз</h2>
-        <p>Тумблер у popup і тумблер у плаваючій панелі тепер синхронізуються. Якщо увімкнути в одному місці, другий теж зміниться.</p>
+        <h2>Обери провайдерів</h2>
+        <p>У popup можна ввімкнути один або кілька провайдерів. За замовчуванням використовується порядок, який краще працює для українських шкільних питань:</p>
         <ul>
-          <li>Автоаналіз перевіряє сторінку раз на <code>10 секунд</code>.</li>
-          <li>Новий запуск відбудеться тільки якщо питання реально змінилися.</li>
+          <li><code>Gemini</code> - основний рушій для тексту і скриншотів.</li>
+          <li><code>OpenRouter</code> - безкоштовний текстовий fallback.</li>
+          <li><code>NVIDIA</code> - free endpoints як запасний варіант.</li>
+          <li><code>Groq</code> - швидкий fallback і запасний vision-аналіз.</li>
         </ul>
       </div>
     </section>
@@ -122,47 +43,37 @@
     <section class="step">
       <div class="num">3</div>
       <div>
-        <h2>Користуйся плаваючою панеллю</h2>
-        <p>На сторінці з’являється синя кнопка <code>🧠</code>. Звичайний тап відкриває панель, а перетягування рухає її по екрану.</p>
-        <ul>
-          <li><strong>Аналізувати</strong> — ручний запуск аналізу сторінки.</li>
-          <li><strong>Виділити область</strong> — скриншот частини екрана для AI-аналізу.</li>
-          <li><strong>Зняти виділення</strong> — прибрати підсвітку відповідей.</li>
-        </ul>
+        <h2>Аналіз сторінки</h2>
+        <p>Натисни <strong>Аналіз</strong> у popup або плаваючій панелі. Розширення знайде питання, відправить його AI та підсвітить відповідь, якщо відповідь вдалося надійно розпізнати.</p>
       </div>
     </section>
 
     <section class="step">
       <div class="num">4</div>
       <div>
-        <h2>Що означає Groq у шапці</h2>
-        <p>Якщо в панелі видно <code>GROQ</code>, це означає, що Gemini до цього не зміг дати відповідь або вичерпав ліміт. Порядок завжди такий:</p>
-        <ul>
-          <li><code>Gemini 2.5</code> через всі доступні ключі</li>
-          <li><code>Gemini 2</code> через всі доступні ключі</li>
-          <li><code>Groq</code> як запасний варіант</li>
-        </ul>
+        <h2>Скриншот</h2>
+        <p>Кнопка <strong>Скриншот</strong> аналізує виділену область. Якщо там тест - дає відповідь і коротке пояснення. Якщо це не тест - коротко описує, що видно на зображенні.</p>
       </div>
     </section>
 
     <section class="step">
       <div class="num">5</div>
       <div>
-        <h2>Kahoot і режим “тільки кольори”</h2>
-        <p>Якщо на телефоні видно лише 4 кольори без тексту питання, розширення не може вгадати правильний колір только по телефону. У такому режимі потрібно або бачити екран з питанням, або скористатися захопленням області на тому екрані, де є сам текст.</p>
+        <h2>Автоаналіз</h2>
+        <p>Автоаналіз перевіряє сторінку приблизно раз на 10 секунд і повторно запускається тільки коли питання змінилося.</p>
       </div>
     </section>
 
     <section class="step">
       <div class="num">6</div>
       <div>
-        <h2>Гаряча клавіша</h2>
-        <p>Для швидкого відкриття панелі використовуй <code>Ctrl + Shift + Q</code>.</p>
+        <h2>Збірка</h2>
+        <p>Запусти <code>.\package-extensions.ps1</code>. У <code>dist/chrome-unpacked</code> і <code>dist/firefox-unpacked</code> локально буде <code>auth.json</code>, але zip-файли для публікації створюються без секретів.</p>
       </div>
     </section>
 
     <div class="note">
-      <strong>Важливо:</strong> AI може помилятися. Перевіряй результат, особливо якщо питання нечітке, на скриншоті мало тексту або сайт нетипово верстає відповіді.
+      <strong>Важливо:</strong> AI може помилятися. Для кращого результату виділяй тільки питання і варіанти відповіді, без зайвої панелі, історії або реклами.
     </div>
   </div>
 </body>

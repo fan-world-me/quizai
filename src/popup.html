@@ -4,66 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Quiz AI Analyzer</title>
-  <style>
-    :root{
-      --bg:#f5f8ff;
-      --panel:#ffffff;
-      --text:#172033;
-      --muted:#6b7280;
-      --line:#dbe6ff;
-      --blue:#1a73e8;
-      --blue-dark:#0b57d0;
-      --blue-soft:#eaf2ff;
-      --red-soft:#fdecec;
-      --red:#c62828;
-      --green-soft:#e8f5ea;
-      --green:#137333;
-      --shadow:0 18px 40px rgba(13, 34, 71, 0.16);
-      --radius:18px;
-    }
-    *{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:linear-gradient(180deg,#eef5ff 0%,#f8fbff 100%);color:var(--text);font:14px/1.4 "Segoe UI",system-ui,sans-serif}
-    body{width:360px}
-    .shell{padding:14px}
-    .card{background:var(--panel);border:1px solid var(--line);border-radius:22px;box-shadow:var(--shadow);overflow:hidden}
-    .hero{padding:18px;background:linear-gradient(135deg,#1a73e8,#0b3d91);color:#fff}
-    .hero-top{display:flex;gap:12px;align-items:center}
-    .logo{width:44px;height:44px;border-radius:14px;background:rgba(255,255,255,.18);display:grid;place-items:center;font-size:18px;font-weight:800;flex:none}
-    .title{font-size:19px;font-weight:800;line-height:1.1;margin:0}
-    .subtitle{margin:4px 0 0;font-size:12px;opacity:.88}
-    .hero-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
-    .chip{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.16);font-size:11px;font-weight:700}
-    .body{padding:14px}
-    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
-    .mini{background:var(--blue-soft);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
-    .mini-k{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#59708d;margin-bottom:4px}
-    .mini-v{font-size:13px;font-weight:700;color:#123a75;word-break:break-word}
-    .mini-v.small{font-size:12px;font-weight:600}
-    .hint{background:#f4f7fb;border:1px solid #e7edf6;border-radius:14px;padding:10px 12px;margin-bottom:12px}
-    .hint-k{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#59708d;margin-bottom:4px}
-    .hint-v{font-size:12px;font-weight:700;color:#334155;line-height:1.45}
-    .toggle-row{display:flex;align-items:center;justify-content:space-between;background:#f4f7fb;border:1px solid #e7edf6;border-radius:16px;padding:13px 14px;margin-bottom:12px}
-    .toggle-label{font-size:14px;font-weight:700}
-    .toggle-sub{font-size:12px;color:var(--muted);margin-top:2px}
-    .toggle{position:relative;width:50px;height:28px;flex:none}
-    .toggle input{opacity:0;width:0;height:0}
-    .slider{position:absolute;inset:0;border-radius:999px;background:#c7d0dc;cursor:pointer;transition:.2s}
-    .slider::before{content:"";position:absolute;left:3px;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.2);transition:.2s}
-    input:checked + .slider{background:var(--blue)}
-    input:checked + .slider::before{transform:translateX(22px)}
-    .status{display:none;align-items:center;gap:8px;border-radius:14px;padding:10px 12px;margin-bottom:12px;font-size:12px;font-weight:600}
-    .status.show{display:flex}
-    .status.ok{background:var(--green-soft);color:var(--green)}
-    .status.err{background:var(--red-soft);color:var(--red)}
-    .dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex:none}
-    .btn{width:100%;border:none;border-radius:16px;padding:13px 14px;font:700 15px/1 "Segoe UI",system-ui,sans-serif;cursor:pointer;transition:.15s}
-    .btn:disabled{cursor:wait;opacity:.75}
-    .btn-primary{background:linear-gradient(135deg,#2b7cff,#1257d8);color:#fff;box-shadow:0 10px 22px rgba(26,115,232,.24)}
-    .btn-primary:hover{filter:brightness(.98)}
-    .btn-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
-    .btn-soft{background:#f4f7fb;color:#334155;border:1px solid #e7edf6}
-    .btn-danger{background:var(--red-soft);color:var(--red);border:1px solid #f7d0d0}
-  </style>
+  <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="shell">
@@ -73,7 +14,7 @@
           <div class="logo">AI</div>
           <div>
             <h1 class="title">Quiz AI Analyzer</h1>
-            <p class="subtitle">Швидкий аналіз тестів і зображень</p>
+            <p class="subtitle">Аналіз тестів, скриншотів і шкільних питань</p>
           </div>
         </div>
         <div class="hero-meta">
@@ -85,7 +26,7 @@
       <div class="body">
         <div class="grid">
           <div class="mini">
-            <div class="mini-k">Залишок</div>
+            <div class="mini-k">Ліміт</div>
             <div class="mini-v" id="usageValue">Немає даних</div>
           </div>
           <div class="mini">
@@ -95,22 +36,52 @@
         </div>
 
         <div class="hint">
-          <div class="hint-k">Current Engine</div>
+          <div class="hint-k">Поточний рушій</div>
           <div class="hint-v" id="engineDetailValue">Engine: auto</div>
         </div>
 
         <div class="hint">
-          <div class="hint-k">Fallback</div>
-          <div class="hint-v" id="fallbackValue">Gemini 2.5 -> Gemini 2 -> Groq</div>
+          <div class="hint-k">Порядок fallback</div>
+          <div class="hint-v" id="fallbackValue">Gemini -> OpenRouter -> NVIDIA -> Groq</div>
         </div>
 
         <div class="hint">
-          <div class="hint-k">Keys</div>
-          <div class="hint-v" id="keyCountValue">Gemini: - | Groq: -</div>
+          <div class="hint-k">Ключі</div>
+          <div class="hint-v" id="keyCountValue">NVIDIA: - | OpenRouter: - | Gemini: - | Groq: -</div>
+        </div>
+
+        <div class="providers">
+          <div class="providers-head">
+            <div>
+              <div class="hint-k">Провайдери</div>
+              <div class="providers-sub">Вибери один або кілька. Порядок лишається оптимальним.</div>
+            </div>
+            <button class="link-btn" id="resetProvidersBtn" type="button">Default</button>
+          </div>
+          <label class="provider-row">
+            <input type="checkbox" value="gemini" data-provider-toggle>
+            <span>Gemini</span>
+            <small>краще для українських питань і скриншотів</small>
+          </label>
+          <label class="provider-row">
+            <input type="checkbox" value="openrouter" data-provider-toggle>
+            <span>OpenRouter</span>
+            <small>безкоштовний текстовий fallback</small>
+          </label>
+          <label class="provider-row">
+            <input type="checkbox" value="nvidia" data-provider-toggle>
+            <span>NVIDIA</span>
+            <small>free endpoints як запасний рушій</small>
+          </label>
+          <label class="provider-row">
+            <input type="checkbox" value="groq" data-provider-toggle>
+            <span>Groq</span>
+            <small>швидкий fallback, також може аналізувати зображення</small>
+          </label>
         </div>
 
         <div class="hint">
-          <div class="hint-k">Last Fallback</div>
+          <div class="hint-k">Останній fallback</div>
           <div class="hint-v" id="attemptTraceValue">Немає даних</div>
         </div>
 
@@ -131,6 +102,7 @@
         </div>
 
         <button class="btn btn-primary" id="analyzeBtn">Аналізувати сторінку</button>
+        <button class="btn btn-soft" id="testConnectionBtn" type="button">Перевірити з'єднання</button>
 
         <div class="btn-row">
           <button class="btn btn-danger" id="clearBtn">Скинути</button>

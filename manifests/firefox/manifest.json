@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Quiz AI Analyzer",
   "version": "2.1",
-  "description": "Автоаналіз тестів: vseosvita.ua, zno.osvita.ua, naurok.ua, Moodle, Google Forms, Kahoot та інші. Аналіз зображень. Groq / Gemini AI.",
+  "description": "Автоаналіз тестів: vseosvita.ua, zno.osvita.ua, naurok.ua, Moodle, Google Forms, Kahoot та інші. Аналіз зображень. NVIDIA / OpenRouter / Gemini / Groq AI. Author: fan_world_me",
   "permissions": [
     "activeTab",
     "tabs",
@@ -39,6 +39,12 @@
       ],
       "run_at": "document_idle",
       "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["Monocraft.ttf"],
+      "matches": ["<all_urls>"]
     }
   ],
   "browser_specific_settings": {

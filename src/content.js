@@ -1,3 +1,6 @@
+// Quiz AI Analyzer - Content Script
+// Author: fan_world_me
+// Floating panel and quiz detection system
 (function () {
   'use strict';
 
@@ -14,6 +17,8 @@
   let captureMode     = false;   /* area-selection state */
   let fabHidden       = false;   /* FAB visibility state */
   let autoTimer       = null;
+  let currentRequestId = 0;      /* request queue management */
+  let abortController = null;    /* abort old requests */
 
   const C_OK  = '#00C851';
   const C_ORG = '#FF8800';
@@ -21,6 +26,41 @@
   const Z     = '2147483647';
   let lastAutoSignature = '';
   const AUTO_SCAN_INTERVAL_MS = 10000;
+
+  /* Debounce utility */
+  function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+
+  /* Check if element is visible */
+  function isElementVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+    if (el.hasAttribute('aria-hidden') && el.getAttribute('aria-hidden') === 'true') return false;
+    if (el.offsetWidth === 0 && el.offsetHeight === 0) return false;
+    return true;
+  }
+
+  /* Normalize text - remove extra whitespace and filter hidden content */
+  function normalizeText(text) {
+    if (!text) return '';
+    return text.replace(/\s+/g, ' ').trim();
+  }
+
+  /* Extract text from element, filtering hidden content */
+  function extractVisibleText(el) {
+    if (!el || !isElementVisible(el)) return '';
+    return normalizeText(el.textContent);
+  }
 
   function isEditorFrame() {
     if (window.top === window) return false;
@@ -289,7 +329,7 @@
     if (hasRuntimeContext()) {
     chrome.runtime.onMessage.addListener((msg) => {
       if (msg.type === 'TRIGGER_ANALYZE')  runAnalysis();
-      if (msg.type === 'CLEAR_HIGHLIGHTS') { clearAll(); lastResults = []; renderResults([]); setStat('Очищено', ''); }
+      if (msg.type === 'CLEAR_HIGHLIGHTS') { cancelCurrentAnalysis(true); clearAll(); lastResults = []; renderResults([]); setStat('Очищено', ''); }
       if (msg.type === 'SETTINGS_CHANGED') onSettingsChange(msg.enabled);
       if (msg.type === 'KEY_UPDATED')      { updatePanelKey(true); }
     });
@@ -327,6 +367,17 @@
 
   function onSettingsChange(en) {
     applyEnabledState(en);
+  }
+
+  function cancelCurrentAnalysis(clearSignature) {
+    currentRequestId++;
+    isAnalyzing = false;
+    if (abortController) {
+      try { abortController.abort(); } catch (_) {}
+      abortController = null;
+    }
+    hideProgress();
+    if (clearSignature) lastAutoSignature = '';
   }
 
   /* ═════════════ PANEL HTML ═════════════ */
@@ -376,159 +427,399 @@
     const fallbackLabel = settings?.fallbackLabel || 'Gemini 2.5 -> Gemini 2 -> Groq';
     return `
 <style>
-#__qaz_wrap *{box-sizing:border-box;margin:0;padding:0;}
+@font-face {
+  font-family: "CustomFont";
+  src: url("${chrome.runtime.getURL('Monocraft.ttf')}") format("truetype");
+  font-display: swap;
+}
+#__qaz_wrap *{box-sizing:border-box;margin:0;padding:0;font-family:CustomFont,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif!important;}
 #__qfab{
-  width:56px;height:56px;
-  background:linear-gradient(135deg,#1a73e8,#0b3d91);
+  width:60px;height:60px;
+  background:rgba(6,20,36,0.75);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid rgba(77,220,255,0.25);
   border-radius:50%;display:flex;align-items:center;justify-content:center;
-  cursor:grab;font-size:26px;position:relative;
-  box-shadow:0 4px 20px rgba(26,115,232,.65);
-  transition:transform .18s,box-shadow .18s;user-select:none;
+  cursor:grab;font-size:28px;position:relative;
+  box-shadow:0 8px 32px rgba(0,229,255,0.35),inset 0 1px 0 rgba(255,255,255,0.1);
+  transition:all .2s ease;user-select:none;
   touch-action:none;-webkit-user-drag:none;
 }
-#__qfab:hover{transform:scale(1.1);box-shadow:0 6px 28px rgba(26,115,232,.8);}
-#__qfab:active{cursor:grabbing;}
+#__qfab:hover{transform:scale(1.08);box-shadow:0 12px 40px rgba(0,229,255,0.5),inset 0 1px 0 rgba(255,255,255,0.15);}
+#__qfab:active{cursor:grabbing;transform:scale(1.02);}
+#__qfab::before{
+  content:'';position:absolute;inset:-2px;border-radius:50%;
+  background:linear-gradient(135deg,rgba(77,220,255,0.4),rgba(0,229,255,0.2));
+  z-index:-1;opacity:0;transition:opacity .2s;
+}
+#__qfab:hover::before{opacity:1;}
 #__qdot{
-  position:absolute;bottom:2px;right:2px;
+  position:absolute;bottom:4px;right:4px;
   width:14px;height:14px;border-radius:50%;
-  background:${en ? '#34a853' : '#999'};border:2.5px solid #fff;
+  background:${en ? '#00e5ff' : '#6f8791'};
+  border:2px solid rgba(6,20,36,0.9);
+  box-shadow:0 0 8px ${en ? 'rgba(0,229,255,0.6)' : 'rgba(111,135,145,0.3)'};
 }
 #__qfabmeta{
-  position:absolute;right:-8px;bottom:-30px;
-  max-width:190px;padding:5px 8px;border-radius:999px;
-  background:rgba(11,61,145,.96);color:#fff;
-  font-size:10px;font-weight:700;line-height:1.2;
+  position:absolute;right:-8px;bottom:-32px;
+  max-width:200px;padding:6px 10px;border-radius:999px;
+  background:rgba(6,20,36,0.85);backdrop-filter:blur(12px);
+  border:1px solid rgba(77,220,255,0.2);
+  color:#9fe8ff;font-size:9px;font-weight:600;line-height:1.3;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-  box-shadow:0 8px 18px rgba(11,61,145,.25);
+  box-shadow:0 4px 16px rgba(0,0,0,0.4);
 }
 #__qcard{
-  position:absolute;bottom:66px;right:0;
-  width:min(292px,calc(100vw - 28px));
-  background:#fff;border-radius:18px;display:none;
-  border:1px solid rgba(26,115,232,.12);
-  box-shadow:0 18px 48px rgba(15,23,42,.18),0 4px 14px rgba(15,23,42,.08);
+  position:absolute;bottom:70px;right:0;
+  width:min(340px,calc(100vw - 24px));
+  background:rgba(4,14,22,0.92);
+  backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+  border-radius:20px;display:none;
+  border:1px solid rgba(77,220,255,0.25);
+  box-shadow:0 20px 60px rgba(0,0,0,0.6),0 0 1px rgba(77,220,255,0.5);
   overflow:hidden;
 }
-#__qcard.open{display:block;animation:__qci .16s ease;}
-@keyframes __qci{from{opacity:0;transform:translateY(10px) scale(.97);}to{opacity:1;transform:none;}}
+#__qcard.open{display:block;animation:__qci .2s cubic-bezier(0.34,1.56,0.64,1);}
+@keyframes __qci{from{opacity:0;transform:translateY(12px) scale(.96);}to{opacity:1;transform:none;}}
 .__qhdr{
-  background:linear-gradient(135deg,#1a73e8,#0b3d91);color:#fff;
-  padding:14px 16px 13px;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+  background:rgba(6,20,36,0.95);
+  border-bottom:1px solid rgba(77,220,255,0.15);
+  padding:16px 18px 14px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;
+  position:relative;
 }
-.__qhtitle{font-size:14px;font-weight:700;display:flex;align-items:center;gap:6px;}
-.__qhmeta{margin-top:6px;display:flex;flex-wrap:wrap;gap:6px;}
-.__qchip{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:600;line-height:1;padding:5px 8px;border-radius:999px;background:rgba(255,255,255,.18);color:#fff;}
-.__qhshort{font-size:10px;background:rgba(255,255,255,.22);padding:2px 8px;border-radius:8px;white-space:nowrap;}
-.__qhide{background:none;border:none;color:rgba(255,255,255,.75);cursor:pointer;font-size:18px;padding:0 0 0 8px;line-height:1;}
-.__qhide:hover{color:#fff;}
-.__qbody{padding:12px 14px 14px;max-height:70vh;overflow-y:auto;background:linear-gradient(180deg,#fff 0%,#f8fbff 100%);}
-.__qoverview{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;}
-.__qov{padding:10px 11px;border-radius:12px;background:#f3f7ff;border:1px solid #d8e6ff;}
-.__qovk{font-size:10px;font-weight:700;color:#5f6b7a;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
-.__qovv{font-size:12px;font-weight:700;color:#123a75;line-height:1.35;word-break:break-word;}
-.__qovv.sm{font-size:11px;font-weight:600;}
-.__qhint{margin-bottom:10px;padding:10px 11px;border-radius:12px;background:#f4f7fb;border:1px solid #e7edf6;}
-.__qhintk{font-size:10px;font-weight:700;color:#5f6b7a;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
-.__qhintv{font-size:11px;font-weight:700;color:#334155;line-height:1.45;}
+.__qhdr::before{
+  content:'';position:absolute;bottom:0;left:15%;right:15%;height:1px;
+  background:linear-gradient(to right,transparent,rgba(0,229,255,0.4),transparent);
+}
+.__qhtitle{font-size:13px;font-weight:700;display:flex;align-items:center;gap:7px;color:#e6f7ff;text-shadow:0 0 8px rgba(77,220,255,0.3);}
+.__qhmeta{margin-top:7px;display:flex;flex-wrap:wrap;gap:6px;}
+.__qchip{
+  display:inline-flex;align-items:center;gap:4px;font-size:9px;font-weight:600;line-height:1;
+  padding:5px 9px;border-radius:999px;
+  background:rgba(77,220,255,0.15);
+  border:1px solid rgba(77,220,255,0.25);
+  color:#9fe8ff;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.1);
+}
+.__qhshort{
+  font-size:9px;background:rgba(77,220,255,0.12);
+  padding:3px 8px;border-radius:8px;white-space:nowrap;
+  color:#bfefff;border:1px solid rgba(77,220,255,0.2);
+}
+.__qhide{
+  background:none;border:none;color:rgba(159,232,255,0.6);
+  cursor:pointer;font-size:18px;padding:0 0 0 8px;line-height:1;
+  transition:all .15s;
+}
+.__qhide:hover{color:#9fe8ff;transform:rotate(90deg);}
+.__qbody{
+  padding:14px 16px 16px;max-height:70vh;overflow-y:auto;
+  background:rgba(4,14,22,0.5);
+}
+.__qbody::-webkit-scrollbar{width:6px;}
+.__qbody::-webkit-scrollbar-track{background:rgba(77,220,255,0.05);border-radius:3px;}
+.__qbody::-webkit-scrollbar-thumb{background:rgba(77,220,255,0.3);border-radius:3px;}
+.__qbody::-webkit-scrollbar-thumb:hover{background:rgba(77,220,255,0.5);}
+.__qoverview{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;}
+.__qov{
+  padding:12px;border-radius:12px;
+  background:rgba(10,28,42,0.6);
+  border:1px solid rgba(77,220,255,0.2);
+  backdrop-filter:blur(8px);
+  transition:all .2s;
+}
+.__qov:hover{
+  background:rgba(10,28,42,0.8);
+  border-color:rgba(77,220,255,0.35);
+  box-shadow:0 4px 12px rgba(0,229,255,0.15);
+}
+.__qovk{font-size:9px;font-weight:700;color:#89cfe6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;}
+.__qovv{font-size:11px;font-weight:700;color:#e6f7ff;line-height:1.4;word-break:break-word;}
+.__qovv.sm{font-size:10px;font-weight:600;color:#bfefff;}
+.__qhint{
+  margin-bottom:12px;padding:12px;border-radius:12px;
+  background:rgba(10,28,42,0.5);
+  border:1px solid rgba(77,220,255,0.18);
+  backdrop-filter:blur(8px);
+}
+.__qhintk{font-size:9px;font-weight:700;color:#89cfe6;text-transform:uppercase;letter-spacing:.05em;margin-bottom:5px;}
+.__qhintv{font-size:10px;font-weight:600;color:#cfe9f2;line-height:1.5;}
 .__qtogrow{
   display:flex;align-items:center;justify-content:space-between;
-  padding:11px 12px;background:#f4f6f8;border-radius:12px;margin-bottom:10px;border:1px solid #ebeff4;
+  padding:12px 14px;
+  background:rgba(10,28,42,0.6);
+  border-radius:12px;margin-bottom:12px;
+  border:1px solid rgba(77,220,255,0.2);
+  backdrop-filter:blur(8px);
+  transition:all .2s;
 }
-.__qtoglbl{font-size:13px;font-weight:600;color:#333;}
-.__qtogsub{font-size:10px;color:#888;margin-top:1px;}
-.__qtog{position:relative;width:40px;height:22px;flex-shrink:0;}
+.__qtogrow:hover{
+  background:rgba(10,28,42,0.8);
+  border-color:rgba(77,220,255,0.3);
+}
+.__qtoglbl{font-size:12px;font-weight:600;color:#e6f7ff;}
+.__qtogsub{font-size:9px;color:#89cfe6;margin-top:2px;}
+.__qtog{position:relative;width:44px;height:24px;flex-shrink:0;}
 .__qtog input{opacity:0;width:0;height:0;}
-.__qsl{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:22px;transition:.25s;}
+.__qsl{
+  position:absolute;cursor:pointer;inset:0;
+  background:rgba(111,135,145,0.4);
+  border:1px solid rgba(77,220,255,0.2);
+  border-radius:24px;transition:.3s;
+}
 .__qsl:before{
-  position:absolute;content:"";width:16px;height:16px;left:3px;bottom:3px;
-  background:#fff;border-radius:50%;transition:.25s;box-shadow:0 1px 4px rgba(0,0,0,.25);
+  position:absolute;content:"";width:18px;height:18px;left:3px;bottom:2px;
+  background:linear-gradient(135deg,#6f8791,#89cfe6);
+  border-radius:50%;transition:.3s;
+  box-shadow:0 2px 6px rgba(0,0,0,0.4);
 }
-.__qtog input:checked+.__qsl{background:#1a73e8;}
-.__qtog input:checked+.__qsl:before{transform:translateX(18px);}
+.__qtog input:checked+.__qsl{
+  background:rgba(0,229,255,0.3);
+  border-color:rgba(0,229,255,0.5);
+  box-shadow:0 0 12px rgba(0,229,255,0.3);
+}
+.__qtog input:checked+.__qsl:before{
+  transform:translateX(20px);
+  background:linear-gradient(135deg,#00e5ff,#4ddcff);
+  box-shadow:0 0 8px rgba(0,229,255,0.6);
+}
 .__qbtn{
-  width:100%;padding:11px 14px;border:none;border-radius:10px;
-  font-size:13px;font-weight:600;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;gap:9px;margin-bottom:8px;
-  transition:all .14s;touch-action:manipulation;
+  width:100%;padding:12px 16px;border:none;border-radius:12px;
+  font-size:12px;font-weight:600;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;
+  transition:all .2s;touch-action:manipulation;
+  backdrop-filter:blur(8px);
+  position:relative;overflow:hidden;
 }
+.__qbtn::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,rgba(255,255,255,0.1),transparent);
+  opacity:0;transition:opacity .2s;
+}
+.__qbtn:hover::before{opacity:1;}
 .__qbtn:last-child{margin-bottom:0;}
-.__qbp{background:#1a73e8;color:#fff;}.__qbp:hover{background:#1558b3;}
-.__qbp:disabled{background:#b8cfe9;cursor:not-allowed;}
-.__qbd{background:#fce8e6;color:#c62828;}.__qbd:hover{background:#f5c0bb;}
-.__qbs{background:#e8f0fe;color:#1a73e8;}.__qbs:hover{background:#d2e3fc;}
-.__qbc{background:#e6f4ea;color:#137333;}.__qbc:hover{background:#ceead6;}
-.__qst{font-size:11px;color:#999;padding:5px 2px 0;min-height:16px;line-height:1.4;}
-.__qst.an{color:${C_ORG};}.__qst.ok{color:${C_OK};}.__qst.er{color:${C_ERR};}
-.__qresults{margin-top:10px;}
-.__qresult-item{
-  padding:9px 11px;border-radius:10px;margin-bottom:7px;
-  border:1.5px solid #e8f5e9;background:#f1fdf4;
+.__qbp{
+  background:rgba(77,220,255,0.25);
+  border:1px solid rgba(77,220,255,0.4);
+  color:#e6f7ff;
+  box-shadow:0 4px 12px rgba(0,229,255,0.2);
 }
-.__qresult-item.er{border-color:#fce8e6;background:#fff5f5;}
-.__qresult-q{font-size:11px;color:#666;margin-bottom:4px;line-height:1.4;}
-.__qresult-a{font-size:12px;font-weight:700;color:#1e7e34;display:flex;align-items:flex-start;gap:5px;}
-.__qresult-a.er{color:${C_ERR};}
-.__qresult-order{font-size:11px;color:#333;line-height:1.6;}
-.__qresult-order b{color:#1a73e8;}
-.__qresult-match{font-size:11px;color:#333;line-height:1.7;}
-.__qresult-match b{color:#1a73e8;}
-.__qnokey{font-size:11px;color:#555;padding:9px 11px;background:#fff8e1;border-radius:9px;margin-bottom:10px;line-height:1.55;}
-.__qnokey a{color:#1a73e8;text-decoration:none;font-weight:600;}
-.__qdiv{height:1px;background:#f0f0f0;margin:10px 0;}
-.__qcap-hint{font-size:11px;color:#555;padding:7px 10px;background:#e8f0fe;border-radius:8px;margin-bottom:8px;line-height:1.5;}
+.__qbp:hover{
+  background:rgba(77,220,255,0.35);
+  border-color:rgba(77,220,255,0.6);
+  box-shadow:0 6px 16px rgba(0,229,255,0.35);
+  transform:translateY(-1px);
+}
+.__qbp:disabled{
+  background:rgba(111,135,145,0.2);
+  border-color:rgba(111,135,145,0.3);
+  color:#6f8791;cursor:not-allowed;
+  box-shadow:none;
+}
+.__qbd{
+  background:rgba(255,68,68,0.15);
+  border:1px solid rgba(255,68,68,0.3);
+  color:#ff9999;
+}
+.__qbd:hover{
+  background:rgba(255,68,68,0.25);
+  border-color:rgba(255,68,68,0.5);
+  transform:translateY(-1px);
+}
+.__qbs{
+  background:rgba(77,220,255,0.12);
+  border:1px solid rgba(77,220,255,0.25);
+  color:#9fe8ff;
+}
+.__qbs:hover{
+  background:rgba(77,220,255,0.2);
+  border-color:rgba(77,220,255,0.4);
+  transform:translateY(-1px);
+}
+.__qbc{
+  background:rgba(0,200,81,0.15);
+  border:1px solid rgba(0,200,81,0.3);
+  color:#66ff99;
+}
+.__qbc:hover{
+  background:rgba(0,200,81,0.25);
+  border-color:rgba(0,200,81,0.5);
+  transform:translateY(-1px);
+}
+.__qst{font-size:10px;color:#89cfe6;padding:6px 4px 0;min-height:18px;line-height:1.5;}
+.__qst.an{color:#FF8800;}.__qst.ok{color:#00e5ff;}.__qst.er{color:#ff6b6b;}
+.__qresults{margin-top:12px;}
+.__qresult-item{
+  padding:12px;border-radius:12px;margin-bottom:10px;
+  background:rgba(10,28,42,0.6);
+  border:1px solid rgba(0,200,81,0.3);
+  backdrop-filter:blur(8px);
+  transition:all .2s;
+}
+.__qresult-item:hover{
+  background:rgba(10,28,42,0.8);
+  border-color:rgba(0,200,81,0.5);
+  box-shadow:0 4px 12px rgba(0,200,81,0.15);
+}
+.__qresult-item.er{border-color:rgba(255,68,68,0.3);background:rgba(40,14,14,0.6);}
+.__qresult-item.er:hover{border-color:rgba(255,68,68,0.5);background:rgba(40,14,14,0.8);}
+.__qresult-q{font-size:10px;color:#89cfe6;margin-bottom:6px;line-height:1.5;}
+.__qresult-a{font-size:11px;font-weight:700;color:#66ff99;display:flex;align-items:flex-start;gap:6px;line-height:1.6;}
+.__qresult-a.er{color:#ff6b6b;}
+.__qresult-order{font-size:10px;color:#cfe9f2;line-height:1.6;}
+.__qresult-order b{color:#00e5ff;}
+.__qresult-match{font-size:10px;color:#cfe9f2;line-height:1.7;}
+.__qresult-match b{color:#00e5ff;}
+.__qnokey{
+  font-size:10px;color:#ff9999;padding:12px;
+  background:rgba(255,68,68,0.15);
+  border:1px solid rgba(255,68,68,0.3);
+  border-radius:12px;margin-bottom:12px;line-height:1.6;
+}
+.__qnokey a{color:#4ddcff;text-decoration:none;font-weight:600;}
+.__qdiv{
+  height:1px;
+  background:linear-gradient(to right,transparent,rgba(77,220,255,0.3),transparent);
+  margin:12px 0;
+}
+.__qcap-hint{
+  font-size:10px;color:#9fe8ff;padding:10px 12px;
+  background:rgba(77,220,255,0.12);
+  border:1px solid rgba(77,220,255,0.25);
+  border-radius:12px;margin-bottom:10px;line-height:1.6;
+}
 /* ── Settings section ── */
-.__qsect{display:none;margin-bottom:8px;}
+.__qsect{display:none;margin-bottom:10px;}
 .__qsecttoggle{
-  font-size:12px;font-weight:600;color:#1a73e8;cursor:pointer;
-  padding:7px 10px;background:#e8f0fe;border-radius:9px;
+  font-size:11px;font-weight:600;color:#9fe8ff;cursor:pointer;
+  padding:10px 12px;
+  background:rgba(77,220,255,0.12);
+  border:1px solid rgba(77,220,255,0.25);
+  border-radius:12px;
   display:flex;align-items:center;justify-content:space-between;
   user-select:none;touch-action:manipulation;
+  transition:all .2s;
 }
-.__qsecttoggle:active{background:#d2e3fc;}
-.__qsecttoggle span{font-size:11px;color:#888;transition:transform .2s;}
-.__qsectbody{padding:10px 0 2px;}
-.__qprovrow{display:flex;gap:7px;margin-bottom:10px;}
+.__qsecttoggle:hover{
+  background:rgba(77,220,255,0.2);
+  border-color:rgba(77,220,255,0.35);
+}
+.__qsecttoggle:active{background:rgba(77,220,255,0.25);}
+.__qsecttoggle span{font-size:10px;color:#89cfe6;transition:transform .2s;}
+.__qsectbody{padding:12px 0 4px;}
+.__qprovrow{display:flex;gap:8px;margin-bottom:12px;}
 .__qprov{
-  flex:1;padding:9px 6px;border:2px solid #e0e0e0;border-radius:9px;
-  background:#fff;font-size:12px;font-weight:600;cursor:pointer;
-  transition:all .15s;touch-action:manipulation;
+  flex:1;padding:10px 8px;
+  border:1px solid rgba(77,220,255,0.25);
+  border-radius:10px;
+  background:rgba(10,28,42,0.5);
+  color:#9fe8ff;
+  font-size:11px;font-weight:600;cursor:pointer;
+  transition:all .2s;touch-action:manipulation;
+  backdrop-filter:blur(8px);
 }
-.__qprov.active{border-color:#1a73e8;background:#e8f0fe;color:#1a73e8;}
-.__qprov:active{opacity:.8;}
-.__qapirow{position:relative;margin-bottom:8px;}
+.__qprov.active{
+  border-color:rgba(0,229,255,0.6);
+  background:rgba(77,220,255,0.2);
+  color:#00e5ff;
+  box-shadow:0 0 12px rgba(0,229,255,0.2);
+}
+.__qprov:hover{
+  background:rgba(10,28,42,0.7);
+  border-color:rgba(77,220,255,0.4);
+}
+.__qprov:active{opacity:.85;}
+.__qapirow{position:relative;margin-bottom:10px;}
 .__qapiinput{
-  width:100%;padding:11px 12px;border:1.5px solid #ddd;
-  border-radius:9px;font-size:13px;outline:none;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  width:100%;padding:12px;
+  border:1px solid rgba(77,220,255,0.25);
+  border-radius:10px;font-size:11px;outline:none;
+  font-family:"Monocraft",monospace;
   box-sizing:border-box;-webkit-text-security:none;
+  background:rgba(10,28,42,0.6);
+  color:#e6f7ff;
+  backdrop-filter:blur(8px);
+  transition:all .2s;
 }
-.__qapiinput:focus{border-color:#1a73e8;}
+.__qapiinput::placeholder{color:#6f8791;}
+.__qapiinput:focus{
+  border-color:rgba(0,229,255,0.5);
+  background:rgba(10,28,42,0.8);
+  box-shadow:0 0 12px rgba(0,229,255,0.15);
+}
 .__qapiinput.hide-text{-webkit-text-security:disc;}
-.__qapibtnrow{display:flex;gap:6px;margin-bottom:8px;}
+.__qapibtnrow{display:flex;gap:8px;margin-bottom:10px;}
 .__qapibtn{
-  flex:1;padding:10px 6px;border:1.5px solid #ddd;border-radius:9px;
-  background:#fff;font-size:12px;font-weight:600;cursor:pointer;
-  touch-action:manipulation;color:#555;
+  flex:1;padding:10px 8px;
+  border:1px solid rgba(77,220,255,0.25);
+  border-radius:10px;
+  background:rgba(10,28,42,0.5);
+  font-size:11px;font-weight:600;cursor:pointer;
+  touch-action:manipulation;color:#9fe8ff;
+  transition:all .2s;
+  backdrop-filter:blur(8px);
 }
-.__qapibtn:active{background:#f5f5f5;}
-.__qapipreview{font-size:10px;color:#888;margin-bottom:6px;min-height:14px;word-break:break-all;}
+.__qapibtn:hover{
+  background:rgba(10,28,42,0.7);
+  border-color:rgba(77,220,255,0.4);
+}
+.__qapibtn:active{opacity:.85;}
+.__qapipreview{font-size:9px;color:#89cfe6;margin-bottom:8px;min-height:14px;word-break:break-all;line-height:1.4;}
+/* ── History section ── */
+.__qhistory{margin-top:12px;}
+.__qhistory-title{
+  font-size:10px;font-weight:700;color:#89cfe6;
+  text-transform:uppercase;letter-spacing:.05em;
+  margin-bottom:8px;padding:0 4px;
+}
+.__qhistory-item{
+  padding:10px 12px;border-radius:10px;margin-bottom:8px;
+  background:rgba(10,28,42,0.5);
+  border:1px solid rgba(77,220,255,0.15);
+  backdrop-filter:blur(8px);
+  transition:all .2s;
+  cursor:pointer;
+}
+.__qhistory-item:hover{
+  background:rgba(10,28,42,0.7);
+  border-color:rgba(77,220,255,0.3);
+  box-shadow:0 4px 12px rgba(0,229,255,0.1);
+}
+.__qhistory-q{font-size:10px;color:#9fe8ff;margin-bottom:4px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.__qhistory-a{font-size:9px;color:#66ff99;line-height:1.5;}
+.__qhistory-time{font-size:8px;color:#6f8791;margin-top:4px;}
+.__qhistory-empty{font-size:10px;color:#6f8791;text-align:center;padding:20px;line-height:1.5;}
 /* ── Restore pill (shown when FAB is hidden on mobile) ── */
 #__qrestpill{
   position:fixed;bottom:22px;right:0;z-index:2147483646;
-  background:linear-gradient(135deg,#1a73e8,#0b3d91);
-  color:#fff;font-size:18px;border-radius:20px 0 0 20px;
-  width:44px;height:44px;display:flex;align-items:center;justify-content:center;
-  box-shadow:0 4px 16px rgba(26,115,232,.5);cursor:pointer;
+  background:rgba(6,20,36,0.85);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  border:1px solid rgba(77,220,255,0.3);
+  color:#00e5ff;font-size:20px;border-radius:20px 0 0 20px;
+  width:48px;height:48px;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 20px rgba(0,229,255,0.4);cursor:pointer;
   touch-action:manipulation;user-select:none;
   animation:__qslide .3s ease;
+  transition:all .2s;
 }
-@keyframes __qslide{from{transform:translateX(44px);}to{transform:translateX(0);}}
+#__qrestpill:hover{
+  background:rgba(6,20,36,0.95);
+  box-shadow:0 6px 24px rgba(0,229,255,0.6);
+}
+@keyframes __qslide{from{transform:translateX(48px);}to{transform:translateX(0);}}
+/* ── Mobile responsive ── */
+@media (max-width: 480px) {
+  #__qcard{width:calc(100vw - 16px);bottom:75px;}
+  .__qoverview{grid-template-columns:1fr;}
+  .__qbody{max-height:60vh;}
+  #__qfab{width:56px;height:56px;font-size:24px;}
+  #__qfabmeta{display:none;}
+}
 </style>
 
 <div id="__qcard">
   <div class="__qhdr">
     <div>
-      <span class="__qhtitle">&#129504; Quiz AI Analyzer</span>
+      <span class="__qhtitle">AI Analyzer</span>
       <div class="__qhmeta">
         <span class="__qchip" id="__qversion">v${version}</span>
         <span class="__qchip" id="__qenginestatus">${statusLabel}</span>
@@ -588,16 +879,22 @@
       </label>
     </div>
 
-    <button class="__qbtn __qbp" id="__qabtn" ${!hasKey ? 'disabled' : ''}>&#128269; Аналізувати</button>
-    <button class="__qbtn __qbs" id="__qscreenbtn" ${!hasKey ? 'disabled' : ''}>&#128247; Виділити область</button>
-    <button class="__qbtn __qbd" id="__qcbtn">&#10005; Зняти виділення</button>
+    <button class="__qbtn __qbp" id="__qabtn" ${!hasKey ? 'disabled' : ''}>Аналіз</button>
+    <button class="__qbtn __qbs" id="__qscreenbtn" ${!hasKey ? 'disabled' : ''}>Скріншот</button>
+    <button class="__qbtn __qbd" id="__qcbtn">Очистити</button>
 
     <div class="__qst" id="__qst"></div>
     <div id="__qresults"></div>
+
+    <div class="__qhistory" id="__qhistory">
+      <div class="__qdiv"></div>
+      <div class="__qhistory-title">Історія (останні 3)</div>
+      <div id="__qhistory-list"></div>
+    </div>
   </div>
 </div>
 
-<div id="__qfab">&#129504;<div id="__qdot"></div><div id="__qfabmeta">${statusLabel}</div></div>`;
+<div id="__qfab">🧠<div id="__qdot"></div><div id="__qfabmeta">${statusLabel}</div></div>`;
   }
 
   /* ═════════════ BIND PANEL ═════════════ */
@@ -629,10 +926,11 @@
       if (fabMetaEl) fabMetaEl.textContent = statusLabel;
       if (usageEl) usageEl.textContent = settings?.usage?.remainingText || 'Немає даних';
       if (usageResetEl) usageResetEl.textContent = settings?.usage?.resetText || 'очікує запит';
-      if (fallbackEl) fallbackEl.textContent = settings?.fallbackLabel || 'Gemini 2.5 -> Gemini 2 -> Groq';
+      if (fallbackEl) fallbackEl.textContent = settings?.fallbackLabel || 'NVIDIA → OpenRouter → Gemini → Groq';
     }
 
     safeSendRuntimeMessage({ type: 'GET_SETTINGS' }, (s) => applyRuntimeMeta(s || {}));
+    renderHistory();
 
     let moved = false, ox = 0, oy = 0;
     const startDrag = (cx, cy) => {
@@ -719,8 +1017,9 @@
       applyEnabledState(togCh.checked);
       chrome.storage.sync.set({ enabled: togCh.checked });
     });
-    abtn.addEventListener('click',   () => { closePanel(); runAnalysis(); });
+    abtn.addEventListener('click',   () => { openPanel(); runAnalysis(); });
     cbtn.addEventListener('click',   () => {
+      cancelCurrentAnalysis(true);
       clearAll(); lastResults = []; renderResults([]);
       setStat('Виділення знято', '');
       setTimeout(() => setStat('', ''), 2000);
@@ -848,7 +1147,7 @@
       if (!document.getElementById('__qrestpill')) {
         const pill = document.createElement('div');
         pill.id = '__qrestpill';
-        pill.textContent = '🧠';
+        pill.textContent = 'AI';
         pill.title = 'Відновити панель';
         Object.assign(pill.style, {
           position:'fixed', bottom:'22px', right:'0', zIndex: Z,
@@ -892,7 +1191,10 @@
     const dot = floatingPanel && floatingPanel.querySelector('#__qdot');
     const chk = floatingPanel && floatingPanel.querySelector('#__qtogchk');
     const sub = floatingPanel && floatingPanel.querySelector('#__qtogsub');
-    if (dot) dot.style.background = en ? '#34a853' : '#999';
+    if (dot) {
+      dot.style.background = en ? '#00e5ff' : '#6f8791';
+      dot.style.boxShadow = en ? '0 0 8px rgba(0,229,255,0.6)' : '0 0 8px rgba(111,135,145,0.3)';
+    }
     if (chk) chk.checked = en;
     if (sub) sub.textContent = en ? 'Увімкнено • раз на 10 сек' : 'Вимкнено';
   }
@@ -952,6 +1254,119 @@
 
   function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  /* ═════════════ HISTORY ═════════════ */
+  /* ═════════════ HISTORY ═════════════ */
+  // Offline history for last 3 analyzed questions
+  // Created by fan_world_me
+  function saveToHistory(results) {
+    try {
+      const history = loadHistory();
+      const timestamp = Date.now();
+      results.forEach(r => {
+        if (r.success) {
+          history.unshift({
+            question: r.question,
+            answer: r.answers ? r.answers.join(', ') : (r.orderItems ? r.orderItems.join(' → ') : (r.pairs ? r.pairs.map(p => `${p.left}→${p.right}`).join(', ') : '')),
+            type: r.type,
+            timestamp
+          });
+        }
+      });
+      const trimmed = history.slice(0, 3);
+      localStorage.setItem('__qaz_history', JSON.stringify(trimmed));
+    } catch (_) {}
+  }
+
+  function loadHistory() {
+    try {
+      return JSON.parse(localStorage.getItem('__qaz_history')) || [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  function renderHistory() {
+    const historyList = floatingPanel && floatingPanel.querySelector('#__qhistory-list');
+    if (!historyList) return;
+    const history = loadHistory();
+    if (!history.length) {
+      historyList.innerHTML = '<div class="__qhistory-empty">Історія порожня<br>Проаналізуйте тест щоб побачити результати тут</div>';
+      return;
+    }
+    historyList.innerHTML = history.map((h, idx) => {
+      const timeAgo = formatTimeAgo(h.timestamp);
+      return `<div class="__qhistory-item" data-idx="${idx}" style="cursor:pointer;">
+        <div class="__qhistory-q">${esc(h.question.slice(0, 60))}${h.question.length > 60 ? '…' : ''}</div>
+        <div class="__qhistory-a">${esc(h.answer.slice(0, 80))}${h.answer.length > 80 ? '…' : ''}</div>
+        <div class="__qhistory-time">${timeAgo}</div>
+      </div>`;
+    }).join('');
+
+    // Add click handlers to show full answer
+    historyList.querySelectorAll('.__qhistory-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const idx = parseInt(item.getAttribute('data-idx'), 10);
+        const h = history[idx];
+        if (!h) return;
+        const box = floatingPanel && floatingPanel.querySelector('#__qresults');
+        if (box) {
+          box.innerHTML = `<div class="__qdiv"></div>
+          <div class="__qresult-item">
+            <div class="__qresult-q">${esc(h.question)}</div>
+            <div class="__qresult-a" style="display:block;font-size:12px;line-height:1.6;color:rgba(255,255,255,0.95);">
+              ${esc(h.answer).replace(/\n/g,'<br>')}
+            </div>
+          </div>`;
+        }
+      });
+    });
+  }
+
+  function formatTimeAgo(timestamp) {
+    const seconds = Math.floor((Date.now() - timestamp) / 1000);
+    if (seconds < 60) return 'щойно';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} хв тому`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} год тому`;
+    const days = Math.floor(hours / 24);
+    return `${days} дн тому`;
+  }
+
+  /* ═════════════ CACHE ═════════════ */
+  // Answer caching system - fan_world_me
+  function getCacheKey(question, options) {
+    const normalized = question.toLowerCase().trim() + '|' + (options || []).join('|').toLowerCase();
+    return 'qaz_cache_' + btoa(normalized).slice(0, 50);
+  }
+
+  function getCachedAnswer(question, options) {
+    try {
+      const key = getCacheKey(question, options);
+      const cached = localStorage.getItem(key);
+      if (!cached) return null;
+      const data = JSON.parse(cached);
+      const age = Date.now() - data.timestamp;
+      if (age > 7 * 24 * 60 * 60 * 1000) {
+        localStorage.removeItem(key);
+        return null;
+      }
+      return data.answer;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setCachedAnswer(question, options, answer) {
+    try {
+      const key = getCacheKey(question, options);
+      localStorage.setItem(key, JSON.stringify({
+        answer,
+        timestamp: Date.now()
+      }));
+    } catch (_) {}
   }
 
   function savePos(x, y) { try { localStorage.setItem('__qaz_p', JSON.stringify({ x, y })); } catch (_) {} }
@@ -1050,6 +1465,9 @@
     /* ── Shared capture + AI send function ── */
     function legacyFireCaptureRequest(x1, y1, w, h) {
       if (w < 20 || h < 20) { setStat('Занадто маленька область', 'er'); return; }
+      clearAll();          // Сбросить старые подсветки
+      lastResults = [];    // Сбросить старые результаты
+      renderResults([]);   // Очистить панель результатов
       setStat('Захоплення…', 'an');
       openPanel();
       safeSendRuntimeMessage({ type: 'CAPTURE_AREA', rect: { x: x1, y: y1, w, h, dpr: window.devicePixelRatio || 1 } }, (res) => {
@@ -1073,11 +1491,19 @@
                 box.innerHTML = `<div class="__qdiv"></div>
                 <div class="__qresult-item">
                   <div class="__qresult-q">&#128247; Аналіз зображення</div>
-                  <div class="__qresult-a" style="display:block;font-size:12px;line-height:1.6;color:#333;">
+                  <div class="__qresult-a" style="display:block;font-size:12px;line-height:1.6;color:rgba(255,255,255,0.95);">
                     ${esc(ans.answer).replace(/\n/g,'<br>')}
                   </div>
                 </div>`;
               }
+              // Save to history
+              saveToHistory([{
+                success: true,
+                question: '📷 Аналіз зображення',
+                answers: [ans.answer],
+                type: 'image'
+              }]);
+              renderHistory();
             });
           } catch(err) { setStat('Помилка canvas: ' + err.message, 'er'); }
         };
@@ -1088,27 +1514,42 @@
 
     function fireCaptureRequest(x1, y1, w, h) {
       if (w < 20 || h < 20) { setStat('Selection too small', 'er'); return; }
+      cancelCurrentAnalysis(true);
+      const captureRequestId = currentRequestId;
+      clearAll();          // Сбросить старые подсветки
+      lastResults = [];    // Сбросить старые результаты
+      renderResults([]);   // Очистить панель результатов
       setStat('Capturing...', 'an');
       openPanel();
       captureAreaBase64({ x: x1, y: y1, w, h, dpr: window.devicePixelRatio || 1 })
         .then((base64) => {
+          if (captureRequestId !== currentRequestId) return;
           setStat('Analyzing image...', 'an');
           safeSendRuntimeMessage({ type: 'ANALYZE_IMAGE', data: { base64 } }, (ans) => {
+            if (captureRequestId !== currentRequestId) return;
             if (!ans || ans.error) { setStat(ans?.error || 'AI error', 'er'); return; }
             setStat(ans.statusLabel || 'Done', 'ok');
             const box = floatingPanel && floatingPanel.querySelector('#__qresults');
             if (box) {
               box.innerHTML = `<div class="__qdiv"></div>
               <div class="__qresult-item">
-                <div class="__qresult-q">&#128247; Image analysis</div>
-                <div class="__qresult-a" style="display:block;font-size:12px;line-height:1.6;color:#333;">
+                <div class="__qresult-a" style="display:block;font-size:13px;line-height:1.6;color:rgba(255,255,255,0.95);">
                   ${esc(ans.answer).replace(/\n/g,'<br>')}
                 </div>
               </div>`;
             }
+            // Save to history
+            saveToHistory([{
+              success: true,
+              question: '📷 Скріншот',
+              answers: [ans.answer],
+              type: 'image'
+            }]);
+            renderHistory();
           });
         })
         .catch((err) => {
+          if (captureRequestId !== currentRequestId) return;
           setStat(err?.message || 'Capture failed', 'er');
         });
     }
@@ -1129,12 +1570,7 @@
     }
   }
 
-  function startAutoLoop() {
-    stopAutoLoop();
-    autoTimer = setInterval(autoRun, AUTO_SCAN_INTERVAL_MS);
-  }
-
-  function autoRun() {
+  const debouncedAutoRun = debounce(function() {
     if (isAnalyzing || !autoEnabled) return;
     const questions = findQuestions();
     const signature = buildQuestionsSignature(questions);
@@ -1142,6 +1578,15 @@
       lastAutoSignature = signature;
       runAnalysis();
     }
+  }, 1500);
+
+  function startAutoLoop() {
+    stopAutoLoop();
+    autoTimer = setInterval(debouncedAutoRun, AUTO_SCAN_INTERVAL_MS);
+  }
+
+  function autoRun() {
+    debouncedAutoRun();
   }
 
   /* ════════════════════════════════════════════
@@ -1709,13 +2154,21 @@
 
   /* ═════════════ ANALYSIS ═════════════ */
   function runAnalysis() {
-    if (isAnalyzing) return;
+    if (isAnalyzing) cancelCurrentAnalysis(false);
+
+    // Cancel previous request if exists
+    if (abortController) {
+      abortController.abort();
+    }
+    abortController = new AbortController();
+    currentRequestId++;
+    const thisRequestId = currentRequestId;
+
     clearAll(); lastResults = []; renderResults([]);
 
     const questions = findQuestions();
     if (!questions.length) {
       setStat('Питань не знайдено', 'er');
-      toast('Тестові питання не знайдено на сторінці', 'er');
       return;
     }
 
@@ -1724,12 +2177,21 @@
     let done = 0;
 
     const next = (i) => {
+      // Ignore if this is an old request
+      if (thisRequestId !== currentRequestId) {
+        return;
+      }
+
       if (i >= questions.length) {
         isAnalyzing = false;
+        abortController = null;
         hideProgress();
         setStat(`Готово: ${done}/${questions.length}`, done > 0 ? 'ok' : 'er');
-        toast(`Аналіз завершено! ${done}/${questions.length}`, done > 0 ? 'ok' : 'er');
+        // Ensure progress is hidden after toast
+        setTimeout(() => hideProgress(), 100);
         renderResults(lastResults);
+        saveToHistory(lastResults);
+        renderHistory();
         openPanel();
         return;
       }
@@ -1745,7 +2207,7 @@
         setStat('📺 Питання на TV', '');
         openPanel();
         const box = floatingPanel && floatingPanel.querySelector('#__qresults');
-        if (box) box.innerHTML = `<div class="__qdiv"></div><div class="__qresult-item"><div class="__qresult-q">📺 Kahoot мультиплеєр</div><div class="__qresult-a" style="display:block;font-size:12px;line-height:1.6;color:#555;">${esc(q.questionText)}</div></div>`;
+        if (box) box.innerHTML = `<div class="__qdiv"></div><div class="__qresult-item"><div class="__qresult-q">📺 Kahoot мультиплеєр</div><div class="__qresult-a" style="display:block;font-size:12px;line-height:1.6;color:rgba(255,255,255,0.95);">${esc(q.questionText)}</div></div>`;
         return;
       }
 
@@ -1759,9 +2221,19 @@
         msgData.rightOptions = q.rightOptions;
       }
 
+      /* Check cache first */
+      const cached = getCachedAnswer(q.questionText, q.options);
+      if (cached) {
+        setStat('📦 З кешу', 'ok');
+        processAnswer(cached, q, () => next(i + 1), () => done++);
+        return;
+      }
+
       safeSendRuntimeMessage({ type: 'ANALYZE_QUIZ', data: msgData }, (res) => {
+        if (thisRequestId !== currentRequestId) return;
         if (res && res.success && res.answer) {
           const ans = res.answer;
+          setCachedAnswer(q.questionText, q.options, ans);
           if (res.statusLabel) setStat(res.statusLabel, 'ok');
           if (floatingPanel) {
             const eng = floatingPanel.querySelector('#__qenginestatus');
@@ -1775,44 +2247,57 @@
             if (reset) reset.textContent = res.usage?.resetText || 'очікує запит';
           }
 
-          if (q.type === 'matching' && ans.matchPairs && ans.matchPairs.length) {
-            applyMatchHighlight(q, ans.matchPairs);
-            lastResults.push({
-              success: true, type: 'matching',
-              question: q.questionText,
-              pairs: ans.matchPairs,
-            });
-            done++;
-          } else if (q.type === 'ordering' && ans.orderIndices && ans.orderIndices.length) {
-            applyOrderHighlight(q, ans.orderIndices);
-            lastResults.push({
-              success: true, type: 'ordering',
-              question: q.questionText,
-              orderItems: ans.orderIndices.map(idx => q.options[idx] || '?'),
-            });
-            done++;
-          } else if (ans.correctIndices && ans.correctIndices.length) {
-            applyHighlight(q, ans);
-            lastResults.push({
-              success: true, type: q.type,
-              question: q.questionText,
-              answers: ans.correctIndices.map(idx => q.options[idx] || '?'),
-            });
-            done++;
-          } else {
-            lastResults.push({ success: false, question: q.questionText, error: 'AI не знайшов відповідь' });
-          }
+          processAnswer(ans, q, () => next(i + 1), () => done++);
         } else {
           const errMsg = (res && res.error) ? res.error : 'Помилка запиту';
           lastResults.push({ success: false, question: q.questionText, error: errMsg.slice(0, 60) });
           setStat(errMsg.slice(0, 90), 'er');
-          if (/ключ|key|403|ліміт|quota|Доступ/i.test(errMsg)) toast('⚠️ ' + errMsg, 'er');
+          setTimeout(() => next(i + 1), 120);
         }
-        setTimeout(() => next(i + 1), 350);
       });
     };
 
     next(0);
+  }
+
+  /* Helper function to process answer (used for both cached and fresh answers) */
+  function processAnswer(ans, q, callback, onDone) {
+    if (q.type === 'matching' && ans.matchPairs && ans.matchPairs.length) {
+      applyMatchHighlight(q, ans.matchPairs);
+      lastResults.push({
+        success: true, type: 'matching',
+        question: q.questionText,
+        pairs: ans.matchPairs,
+      });
+      if (onDone) onDone();
+    } else if (q.type === 'ordering' && ans.orderIndices && ans.orderIndices.length) {
+      applyOrderHighlight(q, ans.orderIndices);
+      lastResults.push({
+        success: true, type: 'ordering',
+        question: q.questionText,
+        orderItems: ans.orderIndices.map(idx => q.options[idx] || '?'),
+      });
+      if (onDone) onDone();
+    } else if (ans.correctIndices && ans.correctIndices.length) {
+      applyHighlight(q, ans);
+      lastResults.push({
+        success: true, type: q.type,
+        question: q.questionText,
+        answers: ans.correctIndices.map(idx => q.options[idx] || '?'),
+      });
+      if (onDone) onDone();
+    } else {
+      // AI returned response but couldn't parse answer - show explanation instead
+      const explanation = ans.explanation || ans.rawResponse || 'Немає відповіді';
+      lastResults.push({
+        success: true,
+        question: q.questionText,
+        answers: [explanation.slice(0, 200)],
+        type: 'text'
+      });
+      if (onDone) onDone();
+    }
+    setTimeout(callback, 120);
   }
 
   /* ═════════════ HIGHLIGHTING ═════════════ */
@@ -1902,62 +2387,24 @@
 
   /* ═════════════ PROGRESS ═════════════ */
   function showProgress(total) {
-    if (progressOverlay) progressOverlay.remove();
-    progressOverlay = document.createElement('div');
-    progressOverlay.style.cssText = [
-      'all:initial','position:fixed','bottom:90px','right:24px',`z-index:${Z}`,
-      'background:#fff','border-radius:14px','padding:14px 18px',
-      'box-shadow:0 4px 22px rgba(0,0,0,.2)','border:1px solid #e0e0e0',
-      'min-width:220px','pointer-events:none',
-      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-    ].join('!important;') + '!important;';
-    progressOverlay.innerHTML = `
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px;">
-        <div style="width:17px;height:17px;border:3px solid #eee;border-top-color:${C_ORG};border-radius:50%;animation:__qspin .75s linear infinite;flex-shrink:0;"></div>
-        <strong style="font-size:13px;color:#333;">Аналізую тест…</strong>
-      </div>
-      <div id="__qpt" style="font-size:12px;color:#666;margin-bottom:7px;">Питання 1 з ${total}</div>
-      <div style="background:#e8e8e8;border-radius:5px;height:5px;overflow:hidden;">
-        <div id="__qpb" style="height:100%;background:${C_OK};width:0%;transition:width .3s ease;"></div>
-      </div>
-      <style>@keyframes __qspin{to{transform:rotate(360deg);}}</style>`;
-    document.documentElement.appendChild(progressOverlay);
+    // Disabled - no progress overlay
+    return;
   }
 
   function setProgress(cur, total) {
-    const t = document.getElementById('__qpt');
-    const b = document.getElementById('__qpb');
-    if (t) t.textContent = `Питання ${cur} з ${total}`;
-    if (b) b.style.width = (cur / total * 100) + '%';
+    // Disabled - no progress overlay
+    return;
   }
 
   function hideProgress() {
-    if (!progressOverlay) return;
-    progressOverlay.style.setProperty('opacity', '0', 'important');
-    progressOverlay.style.setProperty('transition', 'opacity .35s', 'important');
-    setTimeout(() => { progressOverlay && progressOverlay.remove(); progressOverlay = null; }, 380);
+    // Disabled - no progress overlay
+    return;
   }
 
   /* ═════════════ TOAST ═════════════ */
   function toast(msg, type) {
-    document.getElementById('__qaz_toast')?.remove();
-    const bdr = type === 'ok' ? C_OK : type === 'er' ? C_ERR : C_ORG;
-    const el = document.createElement('div');
-    el.id = '__qaz_toast';
-    el.style.cssText = [
-      'all:initial','position:fixed','bottom:90px','left:50%','transform:translateX(-50%)',
-      `z-index:${Z}`,'background:#fff','border-radius:22px','padding:11px 22px',
-      'box-shadow:0 4px 20px rgba(0,0,0,.18)',`border-left:4px solid ${bdr}`,
-      'font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-      'font-size:13px','color:#333','white-space:nowrap','pointer-events:none',
-    ].join('!important;') + '!important;';
-    el.textContent = msg;
-    document.documentElement.appendChild(el);
-    setTimeout(() => {
-      el.style.setProperty('opacity', '0', 'important');
-      el.style.setProperty('transition', 'opacity .35s', 'important');
-      setTimeout(() => el.remove(), 380);
-    }, 4500);
+    // Disabled - no toast messages
+    return;
   }
 
   /* ═════════════ FULLSCREEN ═════════════ */

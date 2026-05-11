@@ -1,56 +1,87 @@
 # Quiz AI Analyzer
 
-Browser extension for automatic quiz analysis with Gemini and Groq fallback.
+Browser extension for analyzing quiz pages, school questions, and selected screenshot areas with multiple AI providers.
 
-## Fallback order
+Author: `fan_world_me`
 
-Text and image requests are sent in this order:
+## Features
 
-1. `gemini-2.5-flash-lite`
-2. `gemini-2.5-flash`
-3. `gemini-2.0-flash-lite`
-4. `gemini-2.0-flash`
-5. Groq fallback models
+- Multi-provider AI fallback: Gemini, OpenRouter, NVIDIA, Groq
+- User-selectable providers in the extension popup
+- Default provider order tuned for Ukrainian/Russian school questions
+- Screenshot analysis for both quiz and non-quiz images
+- Automatic answer highlighting on supported quiz pages
+- Auto-analysis loop with duplicate-question detection
+- Offline history for recent results
+- Answer cache to reduce repeated API calls
+- Chrome and Firefox build outputs
+- Monocraft-based UI
 
-For each model, the extension first tries all available API keys one by one. Only after all keys for the current model are exhausted or temporarily rate-limited does it move to the next model.
+## Default Provider Order
 
-## Project structure
+The default order is:
 
-- `src/` - extension source files
-- `src/auth.example.json` - example file for API keys
-- `src/auth.json` - local secrets file used by the extension
-- `manifests/` - Chrome and Firefox manifests
-- `package-extensions.ps1` - build script
+1. Gemini
+2. OpenRouter
+3. NVIDIA
+4. Groq
 
-## Add API keys
+Users can enable one or more providers in the popup. If a provider is disabled, the extension skips it completely.
 
-1. Create `src/auth.json` from `src/auth.example.json`.
-2. Put your Gemini keys into `geminiKeys`.
-3. Put your Groq key into `groqKeys`.
+## Image Analysis
 
-Example:
+The screenshot tool is not limited to tests:
+
+- If the selected image contains a quiz question, the extension returns an answer and a short explanation.
+- If the selected image is not a quiz, the extension returns a short visual analysis.
+
+Gemini Vision is used first by default because it is more reliable for OCR and Ukrainian/Russian school tasks. Groq vision can be used as a fallback when enabled.
+
+## Project Structure
+
+```text
+src/
+  background.js        AI provider logic, fallback, API calls
+  content.js           Floating panel, page detection, highlighting, screenshots
+  popup.html           Extension popup
+  popup.css            Popup styles
+  popup.js             Popup controls and provider selection
+  howto.html           Built-in help page
+  howto.css            Help page styles
+  auth.example.json    Example API key file
+  auth.json            Local secrets file, ignored by git
+  Monocraft.ttf        Bundled UI font
+  icons/               Extension icons
+  parsers/             Experimental parser modules
+manifests/
+  chrome/manifest.json
+  firefox/manifest.json
+package-extensions.ps1
+```
+
+## API Keys
+
+Create `src/auth.json` from `src/auth.example.json`:
 
 ```json
 {
-  "geminiKeys": [
-    "AIzaSyYourFirstGeminiKey",
-    "AIzaSyYourSecondGeminiKey"
-  ],
-  "groqKeys": [
-    "gsk_your_groq_key"
-  ]
+  "nvidiaKeys": ["nvapi-your_nvidia_key"],
+  "openrouterKeys": ["sk-or-v1-your_openrouter_key"],
+  "geminiKeys": ["AIzaSyYourGeminiKey"],
+  "groqKeys": ["gsk_your_groq_key"]
 }
 ```
 
 Notes:
 
-- `src/auth.json` is ignored by Git.
-- Users can still add or override keys from the extension UI via `chrome.storage.sync`.
-- If UI keys exist, they are used first. `src/auth.json` is used as bundled fallback.
+- `src/auth.json` is ignored by git.
+- Local unpacked builds include `auth.json` so development works.
+- Zip packages do not include `auth.json`, so secrets are not published.
+- Users can also add keys through extension storage/UI where supported.
 
 ## Build
 
-Run in PowerShell from the project root:
+Run in PowerShell from the repository root:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
@@ -64,25 +95,48 @@ Build output:
 - `dist/quiz-ai-chrome.zip`
 - `dist/quiz-ai-firefox.zip`
 
-## Load into browser
+## Load In Browser
 
-### Chrome
+Chrome:
 
 1. Open `chrome://extensions`
 2. Enable Developer mode
 3. Click `Load unpacked`
 4. Select `dist/chrome-unpacked`
 
-### Firefox
+Firefox:
 
 1. Open `about:debugging#/runtime/this-firefox`
 2. Click `Load Temporary Add-on`
-3. Select any file inside `dist/firefox-unpacked`, usually `manifest.json`
+3. Select `manifest.json` inside `dist/firefox-unpacked`
 
-## Publish to Git
+## Git Hygiene
 
-Before pushing:
+Tracked:
 
-1. Verify `src/auth.json` is not staged.
-2. Verify `dist/` is not staged.
-3. Commit source files, manifests, `README.md`, and `src/auth.example.json`.
+- `src/`
+- `manifests/`
+- `package-extensions.ps1`
+- `README.md`
+- `LICENSE`
+
+Ignored:
+
+- `src/auth.json`
+- `dist/`
+- `*.zip`
+- local IDE folders and cache folders
+- custom local fonts, except bundled `src/Monocraft.ttf`
+
+Before publishing, verify:
+
+```powershell
+git status --short
+Get-ChildItem dist -Recurse -Filter auth.json
+```
+
+`auth.json` may exist in local unpacked folders, but it must not be committed and must not appear in zip packages.
+
+## Disclaimer
+
+AI answers can be wrong. Review results before relying on them, especially for unclear screenshots, unusual quiz layouts, or questions that depend on classroom-specific context.

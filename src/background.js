@@ -1,15 +1,33 @@
+﻿// Quiz AI Analyzer - Background Service Worker
+// Author: fan_world_me
 const ENGINE_COOLDOWN_MS = 15 * 60 * 1000;
 const APP_VERSION = chrome.runtime.getManifest().version;
-const FALLBACK_LABEL = 'Gemini 2.5 -> Gemini 2 -> Groq';
+const FALLBACK_LABEL = 'NVIDIA → OpenRouter → Gemini → Groq';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
+const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const AUTH_CONFIG_URL = chrome.runtime.getURL('auth.json');
+
+const NVIDIA_TEXT_MODELS = [
+  'nvidia/llama-3.3-nemotron-super-49b-v1.5',
+  'mistralai/mistral-nemotron',
+  'nvidia/nemotron-mini-4b-instruct',
+];
+const NVIDIA_VISION_MODELS = [
+  'mistralai/mistral-large-3-675b-instruct-2512',
+];
+
+const OPENROUTER_TEXT_MODELS = ['openai/gpt-oss-120b:free'];
+const OPENROUTER_VISION_MODELS = ['openai/gpt-oss-120b:free'];
 
 const GEMINI_TEXT_25 = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 const GEMINI_TEXT_2 = ['gemini-2.0-flash-lite', 'gemini-2.0-flash'];
+const GEMINI_TEXT_15 = ['gemini-1.5-flash-latest', 'gemini-1.5-flash'];
 const GEMINI_VISION_25 = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 const GEMINI_VISION_2 = ['gemini-2.0-flash-lite', 'gemini-2.0-flash'];
+const GEMINI_VISION_15 = ['gemini-1.5-flash-latest', 'gemini-1.5-flash'];
 
 const GROQ_TEXT_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama3-8b-8192'];
 const GROQ_VISION_MODELS = [
@@ -18,6 +36,16 @@ const GROQ_VISION_MODELS = [
   'llama-3.2-90b-vision-preview',
   'llama-3.2-11b-vision-preview',
 ];
+
+const PROVIDER_ORDER = ['gemini', 'openrouter', 'nvidia', 'groq'];
+const PROVIDER_LABELS = {
+  gemini: 'Gemini',
+  openrouter: 'OpenRouter',
+  nvidia: 'NVIDIA',
+  groq: 'Groq',
+};
+const QUIZ_SYSTEM_PROMPT = 'You solve quiz questions. The first characters of your response MUST be the requested label: ANSWER:, ORDER:, or MATCHING:. Return only the requested short format. No markdown, no translation, no restating the question, no thinking aloud.';
+const OCR_SYSTEM_PROMPT = 'You are an OCR engine for quiz screenshots. Extract visible text exactly. Preserve language, letters, numbers, and option labels. Do not translate or explain.';
 
 const engineState = new Map();
 let lastMeta = null;
@@ -47,11 +75,36 @@ function parseApiKeys(value, provider) {
     if (matches && matches.length) return uniqueNonEmpty(matches);
   }
 
+  if (provider === 'nvidia') {
+    const matches = raw.match(/nvapi-[0-9A-Za-z_\-]+/g);
+    if (matches && matches.length) return uniqueNonEmpty(matches);
+  }
+
+  if (provider === 'openrouter') {
+    const matches = raw.match(/sk-or-v1-[0-9a-f]+/g);
+    if (matches && matches.length) return uniqueNonEmpty(matches);
+  }
+
   return uniqueNonEmpty(raw.split(/[\s,;\n\r\t]+/));
 }
 
 function readStorage(keys) {
   return new Promise((resolve) => chrome.storage.sync.get(keys, resolve));
+}
+
+function normalizeProviderList(value) {
+  const list = Array.isArray(value) ? value : PROVIDER_ORDER;
+  const normalized = list.filter((provider) => PROVIDER_ORDER.includes(provider));
+  return normalized.length ? [...new Set(normalized)] : [...PROVIDER_ORDER];
+}
+
+async function getEnabledProviders() {
+  const data = await readStorage(['enabledProviders']);
+  return normalizeProviderList(data.enabledProviders);
+}
+
+function formatProviderList(providers) {
+  return normalizeProviderList(providers).map((provider) => PROVIDER_LABELS[provider]).join(' -> ');
 }
 
 async function loadAuthConfig() {
@@ -67,11 +120,13 @@ async function getBundledKeys(provider) {
   const auth = await loadAuthConfig();
   if (provider === 'gemini') return uniqueNonEmpty(auth?.geminiKeys);
   if (provider === 'groq') return uniqueNonEmpty(auth?.groqKeys);
+  if (provider === 'nvidia') return uniqueNonEmpty(auth?.nvidiaKeys);
+  if (provider === 'openrouter') return uniqueNonEmpty(auth?.openrouterKeys);
   return [];
 }
 
 async function getProviderKeys(provider) {
-  const data = await readStorage(['apiKey', 'geminiApiKey', 'geminiApiKeys', 'groqApiKey', 'groqApiKeys', 'provider']);
+  const data = await readStorage(['apiKey', 'geminiApiKey', 'geminiApiKeys', 'groqApiKey', 'groqApiKeys', 'nvidiaApiKey', 'nvidiaApiKeys', 'openrouterApiKey', 'openrouterApiKeys', 'provider']);
 
   if (provider === 'gemini') {
     const userKeys = uniqueNonEmpty([
@@ -79,6 +134,22 @@ async function getProviderKeys(provider) {
       ...parseApiKeys(data.geminiApiKey, 'gemini'),
     ]);
     return userKeys.length ? userKeys : await getBundledKeys('gemini');
+  }
+
+  if (provider === 'nvidia') {
+    const userKeys = uniqueNonEmpty([
+      ...parseApiKeys(data.nvidiaApiKeys, 'nvidia'),
+      ...parseApiKeys(data.nvidiaApiKey, 'nvidia'),
+    ]);
+    return userKeys.length ? userKeys : await getBundledKeys('nvidia');
+  }
+
+  if (provider === 'openrouter') {
+    const userKeys = uniqueNonEmpty([
+      ...parseApiKeys(data.openrouterApiKeys, 'openrouter'),
+      ...parseApiKeys(data.openrouterApiKey, 'openrouter'),
+    ]);
+    return userKeys.length ? userKeys : await getBundledKeys('openrouter');
   }
 
   const userKeys = uniqueNonEmpty([
@@ -90,13 +161,17 @@ async function getProviderKeys(provider) {
 }
 
 async function getProviderKeyCounts() {
-  const [geminiKeys, groqKeys] = await Promise.all([
+  const [geminiKeys, groqKeys, nvidiaKeys, openrouterKeys] = await Promise.all([
     getProviderKeys('gemini'),
     getProviderKeys('groq'),
+    getProviderKeys('nvidia'),
+    getProviderKeys('openrouter'),
   ]);
   return {
     gemini: geminiKeys.length,
     groq: groqKeys.length,
+    nvidia: nvidiaKeys.length,
+    openrouter: openrouterKeys.length,
   };
 }
 
@@ -124,10 +199,22 @@ function isEngineAvailable(provider, tier, model, keyIndex) {
 
 function formatModelLabel(provider, model) {
   const known = {
+    'gemini-2.5-pro': 'Gemini 2.5 Pro',
+    'gemini-2.5-flash-native-audio-preview-12-2025': 'Gemini 2.5 Flash Audio 12-2025',
+    'gemini-2.5-flash-native-audio-preview-09-2025': 'Gemini 2.5 Flash Audio 09-2025',
+    'gemini-2.5-flash-native-audio-latest': 'Gemini 2.5 Flash Audio Latest',
     'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
     'gemini-2.5-flash': 'Gemini 2.5 Flash',
+    'gemini-1.5-flash-latest': 'Gemini 1.5 Flash Latest',
+    'gemini-1.5-flash': 'Gemini 1.5 Flash',
     'gemini-2.0-flash-lite': 'Gemini 2 Flash Lite',
     'gemini-2.0-flash': 'Gemini 2 Flash',
+    'nvidia/nemotron-3-super-120b-a12b': 'NVIDIA Nemotron 120B',
+    'nvidia/llama-3.3-nemotron-super-49b-v1.5': 'NVIDIA Nemotron Super 49B',
+    'mistralai/mistral-nemotron': 'NVIDIA Mistral Nemotron',
+    'nvidia/nemotron-mini-4b-instruct': 'NVIDIA Nemotron Mini 4B',
+    'mistralai/mistral-large-3-675b-instruct-2512': 'NVIDIA Mistral Large Vision',
+    'openai/gpt-oss-120b:free': 'OpenRouter GPT-OSS 120B',
     'llama-3.3-70b-versatile': 'Groq Llama 3.3 70B',
     'llama-3.1-8b-instant': 'Groq Llama 3.1 8B',
     'llama3-8b-8192': 'Groq Llama 3 8B',
@@ -141,8 +228,13 @@ function formatModelLabel(provider, model) {
 
 function getStatusLabel(meta) {
   if (!meta) return 'Engine: auto';
-  const totalKeys = Number(meta.totalKeys) > 0 ? meta.totalKeys : '?';
-  return `${formatModelLabel(meta.provider, meta.model)} | key ${meta.keyIndex + 1}/${totalKeys}`;
+  const modelLabel = formatModelLabel(meta.provider, meta.model);
+  // Show key count only for Gemini
+  if (meta.provider === 'gemini') {
+    const totalKeys = Number(meta.totalKeys) > 0 ? meta.totalKeys : '?';
+    return `${modelLabel} | key ${meta.keyIndex + 1}/${totalKeys}`;
+  }
+  return modelLabel;
 }
 
 function readHeader(headers, names) {
@@ -200,7 +292,7 @@ function rememberSuccessfulCall(provider, model, keyIndex, tier, headers, totalK
 
 function getSettings() {
   return new Promise((resolve) => {
-    chrome.storage.sync.get(['enabled', 'geminiApiKey', 'geminiApiKeys', 'groqApiKey', 'groqApiKeys', 'apiKey', 'provider'], async (data) => {
+    chrome.storage.sync.get(['enabled', 'enabledProviders', 'geminiApiKey', 'geminiApiKeys', 'groqApiKey', 'groqApiKeys', 'nvidiaApiKey', 'nvidiaApiKeys', 'openrouterApiKey', 'openrouterApiKeys', 'apiKey', 'provider'], async (data) => {
       const geminiKeys = uniqueNonEmpty([
         ...parseApiKeys(data.geminiApiKeys, 'gemini'),
         ...parseApiKeys(data.geminiApiKey, 'gemini'),
@@ -210,18 +302,31 @@ function getSettings() {
         ...parseApiKeys(data.groqApiKey, 'groq'),
         ...(String(data.provider || '') === 'groq' ? parseApiKeys(data.apiKey, 'groq') : []),
       ]);
+      const nvidiaKeys = uniqueNonEmpty([
+        ...parseApiKeys(data.nvidiaApiKeys, 'nvidia'),
+        ...parseApiKeys(data.nvidiaApiKey, 'nvidia'),
+      ]);
+      const openrouterKeys = uniqueNonEmpty([
+        ...parseApiKeys(data.openrouterApiKeys, 'openrouter'),
+        ...parseApiKeys(data.openrouterApiKey, 'openrouter'),
+      ]);
       const keyCounts = await getProviderKeyCounts();
-      const [bundledGeminiKeys, bundledGroqKeys] = await Promise.all([
+      const enabledProviders = normalizeProviderList(data.enabledProviders);
+      const [bundledGeminiKeys, bundledGroqKeys, bundledNvidiaKeys, bundledOpenrouterKeys] = await Promise.all([
         getBundledKeys('gemini'),
         getBundledKeys('groq'),
+        getBundledKeys('nvidia'),
+        getBundledKeys('openrouter'),
       ]);
       resolve({
         enabled: data.enabled !== false,
-        hasBuiltinKeys: geminiKeys.length > 0 || groqKeys.length > 0 || bundledGeminiKeys.length > 0 || bundledGroqKeys.length > 0,
+        hasBuiltinKeys: geminiKeys.length > 0 || groqKeys.length > 0 || nvidiaKeys.length > 0 || openrouterKeys.length > 0 || bundledGeminiKeys.length > 0 || bundledGroqKeys.length > 0 || bundledNvidiaKeys.length > 0 || bundledOpenrouterKeys.length > 0,
         version: APP_VERSION,
         statusLabel: getStatusLabel(lastMeta),
         usage: lastUsage,
-        fallbackLabel: FALLBACK_LABEL,
+        fallbackLabel: formatProviderList(enabledProviders),
+        enabledProviders,
+        providerOrder: PROVIDER_ORDER,
         keyCounts,
         lastAttemptTrace,
       });
@@ -235,7 +340,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message.type === 'GET_SETTINGS') {
-    getSettings().then(sendResponse);
+    getSettings().then((settings) => {
+      if (chrome.runtime.lastError) return;
+      sendResponse(settings);
+    }).catch(() => {});
     return true;
   }
   if (message.type === 'CAPTURE_AREA') {
@@ -246,7 +354,27 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleAnalyzeImage(message.data, sendResponse);
     return true;
   }
+  if (message.type === 'TEST_CONNECTION') {
+    handleTestConnection(sendResponse);
+    return true;
+  }
 });
+
+async function handleTestConnection(sendResponse) {
+  try {
+    const prompt = 'Test';
+    const result = await analyzeTextWithFallback(prompt, { question: 'Test', options: ['A', 'B'], questionType: 'radio' });
+    if (chrome.runtime.lastError) return;
+    sendResponse({
+      success: true,
+      provider: result.meta?.provider || 'Unknown',
+      model: result.meta?.model || 'Unknown'
+    });
+  } catch (err) {
+    if (chrome.runtime.lastError) return;
+    sendResponse({ error: err.message });
+  }
+}
 
 async function handleCapture(sender, sendResponse) {
   try {
@@ -277,8 +405,10 @@ async function handleCapture(sender, sendResponse) {
       }
     }
 
+    if (chrome.runtime.lastError) return;
     sendResponse({ base64: dataUrl.replace(/^data:image\/\w+;base64,/, '') });
   } catch (err) {
+    if (chrome.runtime.lastError) return;
     sendResponse({
       error: `Capture failed: ${err.message}`,
       needsLocalCapture: true
@@ -289,24 +419,36 @@ async function handleCapture(sender, sendResponse) {
 async function handleAnalyzeImage(data, sendResponse) {
   try {
     const result = await analyzeImageWithFallback(data.base64);
+    const answer = cleanImageAnalysisText(result.text || '');
+
+    if (chrome.runtime.lastError) return;
     sendResponse({
       success: true,
-      answer: result.text,
+      answer,
       meta: result.meta,
       statusLabel: getStatusLabel(result.meta),
       usage: result.meta?.usage || null,
     });
   } catch (err) {
+    if (chrome.runtime.lastError) return;
     sendResponse({ error: err.message });
   }
 }
-
 // --- Kahoot-adapted helpers (use existing Gemini/Groq fallback functions) ---
 
 async function answerQuestionWithProviders(title, choices) {
   if (!Array.isArray(choices) || choices.length === 0) throw new Error('No answer choices provided.');
   const numbered = choices.map((c, i) => `${i + 1}) ${c}`).join('\n');
-  const prompt = `Question: ${title}\n\n${numbered}\n\nReply with ONLY the number (1-${choices.length}) of the correct answer.`;
+  const prompt = `Single-choice quiz.
+Question: ${title}
+
+Options:
+${numbered}
+
+Your first characters must be "ANSWER:".
+Return exactly:
+ANSWER: <one number from 1 to ${choices.length}>
+EXPLANATION: <short reason>`;
 
   const result = await analyzeTextWithFallback(prompt, {});
   const raw = (result?.text || '').trim();
@@ -338,7 +480,16 @@ async function answerQuestionWithProviders(title, choices) {
 async function answerMultiSelectWithProviders(title, choices) {
   if (!Array.isArray(choices) || choices.length === 0) throw new Error('No answer choices provided.');
   const numbered = choices.map((c, i) => `${i + 1}) ${c}`).join('\n');
-  const prompt = `Question: ${title}\n\n${numbered}\n\nThis is a multi-select quiz — there are MULTIPLE correct answers (usually 2-4).\nFor EACH option, decide if it correctly answers the question.\nRespond with one line per option: NUMBER:YES or NUMBER:NO`;
+  const prompt = `Multi-select quiz.
+Question: ${title}
+
+Options:
+${numbered}
+
+Your first characters must be "ANSWER:".
+Return exactly:
+ANSWER: <correct numbers comma-separated>
+EXPLANATION: <short reason>`;
 
   const result = await analyzeTextWithFallback(prompt, {});
   const raw = (result?.text || '').trim();
@@ -428,26 +579,34 @@ async function handleAnalyzeQuiz(data, sendResponse) {
       if (qType === 'pin_it' || qType === 'pin') {
         // Expect imageBase64 in data.imageBase64 (content capture) or ask caller to capture
         const imageBase64 = data.imageBase64 || data.base64 || null;
-        if (!imageBase64) { sendResponse({ error: 'No image provided for pin question' }); return; }
+        if (!imageBase64) {
+          if (chrome.runtime.lastError) return;
+          sendResponse({ error: 'No image provided for pin question' });
+          return;
+        }
         const r = await answerPinWithProviders(data.question, imageBase64);
+        if (chrome.runtime.lastError) return;
         sendResponse({ success: true, answer: { coords: r.coords }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
       }
 
       if (qType === 'slider') {
         const r = await answerSliderWithProviders(data.question, data.sliderConfig || {});
+        if (chrome.runtime.lastError) return;
         sendResponse({ success: true, answer: { value: r.value }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
       }
 
       if (qType === 'jumble') {
         const r = await answerJumbleWithProviders(data.question, data.options || []);
+        if (chrome.runtime.lastError) return;
         sendResponse({ success: true, answer: { answerWord: r.answerWord }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
       }
 
       if (qType === 'open_ended' || qType === 'short_answer') {
         const r = await answerOpenEndedWithProviders(data.question);
+        if (chrome.runtime.lastError) return;
         sendResponse({ success: true, answer: { answer: r.answer }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
       }
@@ -455,21 +614,39 @@ async function handleAnalyzeQuiz(data, sendResponse) {
       // Multi-select / checkbox
       if (qType === 'checkbox' || qType === 'multiple_select_quiz' || Array.isArray(data.options) && data.options.length > 4) {
         const r = await answerMultiSelectWithProviders(data.question, data.options || []);
+        if (chrome.runtime.lastError) return;
         sendResponse({ success: true, answer: { correctIndices: r.correctIndices }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
       }
 
       // Default: single-choice
       const r = await answerQuestionWithProviders(data.question, data.options || []);
+      if (chrome.runtime.lastError) return;
       sendResponse({ success: true, answer: { correctIndices: r.correctIndices }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
       return;
     }
 
     // Fallback: original generic pipeline
     const prompt = buildPrompt(data.question, data.options, data.questionType || 'radio', data.rightOptions);
-    const result = await analyzeTextWithFallback(prompt, data);
-    const parsed = parseAIResponse(result.text, data.options, data.questionType || 'radio', data.rightOptions);
+    let result = await analyzeTextWithFallback(prompt, data);
+    let parsed = parseAIResponse(result.text, data.options, data.questionType || 'radio', data.rightOptions);
 
+    if (!hasParsedAnswer(parsed, data.questionType || 'radio')) {
+      const retryPrompt = `${prompt}
+
+The previous response ignored the format. Reply now with the final answer only.
+Your first characters must be "ANSWER:" (or "ORDER:"/"MATCHING:" for that task type).`;
+      const retry = await tryGeminiTextModel(retryPrompt, GEMINI_TEXT_25[0], '2.5');
+      if (retry.success) {
+        const retryParsed = parseAIResponse(retry.text, data.options, data.questionType || 'radio', data.rightOptions);
+        if (hasParsedAnswer(retryParsed, data.questionType || 'radio')) {
+          result = retry;
+          parsed = retryParsed;
+        }
+      }
+    }
+
+    if (chrome.runtime.lastError) return;
     sendResponse({
       success: true,
       answer: parsed,
@@ -479,65 +656,134 @@ async function handleAnalyzeQuiz(data, sendResponse) {
       usage: result.meta?.usage || null,
     });
   } catch (err) {
+    if (chrome.runtime.lastError) return;
     sendResponse({ error: err.message });
   }
 }
 
+// Fallback system tuned for school quizzes: Gemini first for multilingual accuracy, then free fallbacks.
+// Created by fan_world_me
 async function analyzeTextWithFallback(prompt, data) {
   const attempts = [];
+  const enabledProviders = await getEnabledProviders();
 
-  for (const model of GEMINI_TEXT_25) {
-    const result = await tryGeminiTextModel(prompt, model, 'gemini-2.5');
-    if (result.success) return result;
-    attempts.push(result.error);
-  }
-
-  for (const model of GEMINI_TEXT_2) {
-    const result = await tryGeminiTextModel(prompt, model, 'gemini-2');
-    if (result.success) return result;
-    attempts.push(result.error);
-  }
-
-  for (const model of GROQ_TEXT_MODELS) {
-    const result = await tryGroqTextModel(prompt, model, 'groq');
-    if (result.success) {
-      lastAttemptTrace = attempts.filter(Boolean);
-      return result;
+  if (enabledProviders.includes('gemini')) {
+    // Priority 1: Gemini 2.5 Flash (newest, best quality, 20 req/day)
+    for (const model of GEMINI_TEXT_25) {
+      const result = await tryGeminiTextModel(prompt, model, '2.5');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
     }
-    attempts.push(result.error);
+
+    // Priority 2: Gemini 2.0 (limited quota)
+    for (const model of GEMINI_TEXT_2) {
+      const result = await tryGeminiTextModel(prompt, model, '2.0');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
+    }
+
+    // Priority 3: Gemini 1.5 Flash (1500 req/day - best quota)
+    for (const model of GEMINI_TEXT_15) {
+      const result = await tryGeminiTextModel(prompt, model, '1.5');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
+    }
+  }
+
+  if (enabledProviders.includes('openrouter')) {
+    // Priority 4: OpenRouter free model.
+    for (const model of OPENROUTER_TEXT_MODELS) {
+      const result = await tryOpenRouterTextModel(prompt, model, 'text');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
+    }
+  }
+
+  if (enabledProviders.includes('nvidia')) {
+    // Priority 5: NVIDIA free endpoints, kept as fallback.
+    for (const model of NVIDIA_TEXT_MODELS) {
+      const result = await tryNvidiaTextModel(prompt, model, 'text');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
+    }
+  }
+
+  if (enabledProviders.includes('groq')) {
+    // Priority 6: Groq final fallback.
+    for (const model of GROQ_TEXT_MODELS) {
+      const result = await tryGroqTextModel(prompt, model, 'text');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
+    }
   }
 
   lastAttemptTrace = attempts.filter(Boolean);
   throw new Error(attempts.filter(Boolean).join('\n') || 'No available engine');
 }
 
+// Image analysis: Gemini Vision first (all keys, all models), then Groq Vision fallback.
+// Author: fan_world_me
 async function analyzeImageWithFallback(base64) {
-  const prompt = 'Read the test question from the image, determine the correct answer, and briefly explain it.';
   const attempts = [];
+  const enabledProviders = await getEnabledProviders();
 
-  for (const model of GEMINI_VISION_25) {
-    const result = await tryGeminiVisionModel(prompt, base64, model, 'gemini-2.5');
-    if (result.success) return result;
-    attempts.push(result.error);
-  }
+  const prompt = `Analyze this screenshot/image.
+If it contains a school quiz or test question, solve it and give the answer.
+If it is not a quiz, briefly describe and analyze what is visible.
+Do not show hidden reasoning. Do not restate these instructions.
+Return 1-4 short lines in the same language as the image when possible.
+Use this format when it is a quiz:
+Відповідь: <answer>
+Пояснення: <one short reason>
+Use this format when it is not a quiz:
+Аналіз: <brief description>`;
 
-  for (const model of GEMINI_VISION_2) {
-    const result = await tryGeminiVisionModel(prompt, base64, model, 'gemini-2');
-    if (result.success) return result;
-    attempts.push(result.error);
-  }
-
-  for (const model of GROQ_VISION_MODELS) {
-    const result = await tryGroqVisionModel(prompt, base64, model, 'groq');
-    if (result.success) {
-      lastAttemptTrace = attempts.filter(Boolean);
-      return result;
+  // 1. Gemini Vision — all models (2.5 → 2.0 → 1.5), all keys per model
+  if (enabledProviders.includes('gemini')) {
+    for (const [models, tier] of [[GEMINI_VISION_25, 'gemini-2.5'], [GEMINI_VISION_2, 'gemini-2'], [GEMINI_VISION_15, 'gemini-1.5']]) {
+      for (const model of models) {
+        const result = await tryGeminiVisionModel(prompt, base64, model, tier);
+        if (result.success) {
+          lastAttemptTrace = attempts.filter(Boolean);
+          return result;
+        }
+        attempts.push(result.error || `Gemini/${model}:FAIL`);
+      }
     }
-    attempts.push(result.error);
+  }
+
+  // 2. Groq Vision fallback — all models, all keys per model
+  if (enabledProviders.includes('groq')) {
+    for (const model of GROQ_VISION_MODELS) {
+      const result = await tryGroqVisionModel(prompt, base64, model, 'vision');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error || `Groq/${model}:FAIL`);
+    }
   }
 
   lastAttemptTrace = attempts.filter(Boolean);
-  throw new Error(attempts.filter(Boolean).join('\n') || 'No available engine');
+  throw new Error('No enabled vision provider could analyze the image. Enable Gemini or Groq and add a valid key.');
 }
 
 async function tryGeminiTextModel(prompt, model, tier) {
@@ -545,7 +791,11 @@ async function tryGeminiTextModel(prompt, model, tier) {
   const geminiKeys = await getProviderKeys('gemini');
 
   for (let keyIndex = 0; keyIndex < geminiKeys.length; keyIndex++) {
-    if (!isEngineAvailable('gemini', tier, model, keyIndex)) continue;
+    if (!isEngineAvailable('gemini', tier, model, keyIndex)) {
+      lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: blocked (cooldown)`;
+      console.log(`[Gemini] Key #${keyIndex + 1} blocked until ${new Date(getEngineState('gemini', tier, model, keyIndex).blockedUntil).toISOString()}`);
+      continue;
+    }
 
     const apiKey = geminiKeys[keyIndex];
     try {
@@ -553,8 +803,11 @@ async function tryGeminiTextModel(prompt, model, tier) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: QUIZ_SYSTEM_PROMPT }]
+          },
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 500 },
+          generationConfig: { temperature: 0, maxOutputTokens: 220 },
           safetySettings: [
             { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
             { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -566,17 +819,22 @@ async function tryGeminiTextModel(prompt, model, tier) {
 
       if (!res.ok) {
         const msg = await readErrorMessage(res);
+        if (res.status === 429 || res.status === 404 || /quota|rate|limit|not found/i.test(msg)) {
+          console.log(`[Gemini] ${tier} ${model} key #${keyIndex + 1}: skipping (${res.status})`);
+        } else {
+          console.error(`[Gemini] ${tier} ${model} key #${keyIndex + 1}: HTTP ${res.status} - ${msg}`);
+        }
         if (res.status === 429 || /quota|rate|limit/i.test(msg)) {
           blockEngine('gemini', tier, model, keyIndex);
-          lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: limit`;
+          lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: limit (${msg})`;
           continue;
         }
         if (res.status === 400 || res.status === 401 || res.status === 403) {
           blockEngine('gemini', tier, model, keyIndex);
-          lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: ${msg}`;
+          lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: ${res.status} ${msg}`;
           continue;
         }
-        lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: ${msg}`;
+        lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: ${res.status} ${msg}`;
         continue;
       }
 
@@ -584,10 +842,12 @@ async function tryGeminiTextModel(prompt, model, tier) {
       const text = payload.candidates?.[0]?.content?.parts?.[0]?.text || '';
       if (!text) {
         lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: empty response`;
+        console.warn(`[Gemini] Empty response from key #${keyIndex + 1}:`, payload);
         continue;
       }
 
       clearEngineBlock('gemini', tier, model, keyIndex);
+      console.log(`[Gemini] Success: ${tier} ${model} key #${keyIndex + 1}`);
       return {
         success: true,
         text,
@@ -595,9 +855,11 @@ async function tryGeminiTextModel(prompt, model, tier) {
       };
     } catch (err) {
       lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: ${err.message}`;
+      console.error(`[Gemini] Exception on key #${keyIndex + 1}:`, err);
     }
   }
 
+  console.log(`[Gemini] All attempts failed for ${tier} ${model}:`, lastError);
   return { success: false, error: lastError || `Gemini ${tier} ${model}: unavailable` };
 }
 
@@ -614,16 +876,24 @@ async function tryGeminiVisionModel(prompt, base64, model, tier) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: prompt.includes('Analyze this screenshot/image') ? 'You analyze images directly. Give concise final observations only. Do not reveal hidden reasoning.' : OCR_SYSTEM_PROMPT }]
+          },
           contents: [{ parts: [
             { text: prompt },
             { inlineData: { mimeType: 'image/jpeg', data: base64 } },
           ] }],
-          generationConfig: { temperature: 0.1, maxOutputTokens: 600 },
+          generationConfig: { temperature: 0, maxOutputTokens: 800 },
         }),
       });
 
       if (!res.ok) {
         const msg = await readErrorMessage(res);
+        if (res.status === 429 || res.status === 404 || /quota|rate|limit|not found/i.test(msg)) {
+          console.log(`[Gemini] ${tier} ${model} key #${keyIndex + 1}: skipping (${res.status})`);
+        } else {
+          console.error(`[Gemini] ${tier} ${model} key #${keyIndex + 1}: HTTP ${res.status} - ${msg}`);
+        }
         if (res.status === 429 || /quota|rate|limit/i.test(msg)) {
           blockEngine('gemini', tier, model, keyIndex);
           lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: limit`;
@@ -676,9 +946,12 @@ async function tryGroqTextModel(prompt, model, tier) {
         },
         body: JSON.stringify({
           model,
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.1,
-          max_tokens: 500,
+          messages: [
+            { role: 'system', content: QUIZ_SYSTEM_PROMPT },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0,
+          max_tokens: 220,
         }),
       });
 
@@ -719,6 +992,265 @@ async function tryGroqTextModel(prompt, model, tier) {
   return { success: false, error: lastError || `Groq ${model}: unavailable` };
 }
 
+async function tryNvidiaTextModel(prompt, model, tier) {
+  let lastError = '';
+  const nvidiaKeys = await getProviderKeys('nvidia');
+
+  for (let keyIndex = 0; keyIndex < nvidiaKeys.length; keyIndex++) {
+    if (!isEngineAvailable('nvidia', tier, model, keyIndex)) continue;
+
+    const apiKey = nvidiaKeys[keyIndex];
+    try {
+      const res = await fetch(NVIDIA_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: QUIZ_SYSTEM_PROMPT },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0,
+          max_tokens: 220,
+          extra_body: { thinking: { type: 'disabled' } },
+        }),
+      });
+
+      if (!res.ok) {
+        const msg = await readErrorMessage(res);
+        if (res.status === 429 || /quota|rate|limit/i.test(msg)) {
+          blockEngine('nvidia', tier, model, keyIndex);
+          lastError = `NVIDIA ${model} key #${keyIndex + 1}: limit`;
+          continue;
+        }
+        if (res.status === 401 || res.status === 403) {
+          blockEngine('nvidia', tier, model, keyIndex);
+          lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${msg}`;
+          continue;
+        }
+        lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${msg}`;
+        continue;
+      }
+
+      const payload = await res.json();
+      const text = payload.choices?.[0]?.message?.content || '';
+      if (!text) {
+        lastError = `NVIDIA ${model} key #${keyIndex + 1}: empty response`;
+        continue;
+      }
+
+      clearEngineBlock('nvidia', tier, model, keyIndex);
+      return {
+        success: true,
+        text,
+        meta: rememberSuccessfulCall('nvidia', model, keyIndex, tier, res.headers, nvidiaKeys.length),
+      };
+    } catch (err) {
+      lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${err.message}`;
+    }
+  }
+
+  return { success: false, error: lastError || `NVIDIA ${model}: unavailable` };
+}
+
+async function tryOpenRouterTextModel(prompt, model, tier) {
+  let lastError = '';
+  const openrouterKeys = await getProviderKeys('openrouter');
+
+  for (let keyIndex = 0; keyIndex < openrouterKeys.length; keyIndex++) {
+    if (!isEngineAvailable('openrouter', tier, model, keyIndex)) continue;
+
+    const apiKey = openrouterKeys[keyIndex];
+    try {
+      const res = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: 'system', content: QUIZ_SYSTEM_PROMPT },
+            { role: 'user', content: prompt }
+          ],
+          temperature: 0,
+          max_tokens: 220,
+        }),
+      });
+
+      if (!res.ok) {
+        const msg = await readErrorMessage(res);
+        if (res.status === 429 || /quota|rate|limit/i.test(msg)) {
+          blockEngine('openrouter', tier, model, keyIndex);
+          lastError = `OpenRouter ${model} key #${keyIndex + 1}: limit`;
+          continue;
+        }
+        if (res.status === 401 || res.status === 403) {
+          blockEngine('openrouter', tier, model, keyIndex);
+          lastError = `OpenRouter ${model} key #${keyIndex + 1}: ${msg}`;
+          continue;
+        }
+        lastError = `OpenRouter ${model} key #${keyIndex + 1}: ${msg}`;
+        continue;
+      }
+
+      const payload = await res.json();
+      const text = payload.choices?.[0]?.message?.content || '';
+      if (!text) {
+        lastError = `OpenRouter ${model} key #${keyIndex + 1}: empty response`;
+        continue;
+      }
+
+      clearEngineBlock('openrouter', tier, model, keyIndex);
+      return {
+        success: true,
+        text,
+        meta: rememberSuccessfulCall('openrouter', model, keyIndex, tier, res.headers, openrouterKeys.length),
+      };
+    } catch (err) {
+      lastError = `OpenRouter ${model} key #${keyIndex + 1}: ${err.message}`;
+    }
+  }
+
+  return { success: false, error: lastError || `OpenRouter ${model}: unavailable` };
+}
+
+async function tryNvidiaVisionModel(prompt, base64, model, tier) {
+  let lastError = '';
+  const nvidiaKeys = await getProviderKeys('nvidia');
+
+  for (let keyIndex = 0; keyIndex < nvidiaKeys.length; keyIndex++) {
+    if (!isEngineAvailable('nvidia', tier, model, keyIndex)) continue;
+
+    const apiKey = nvidiaKeys[keyIndex];
+    try {
+      const res = await fetch(NVIDIA_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
+            ],
+          }],
+          temperature: 0,
+          max_tokens: 500,
+        }),
+      });
+
+      if (!res.ok) {
+        const msg = await readErrorMessage(res);
+        if (res.status === 429 || /quota|rate|limit/i.test(msg)) {
+          blockEngine('nvidia', tier, model, keyIndex);
+          lastError = `NVIDIA ${model} key #${keyIndex + 1}: limit`;
+          continue;
+        }
+        if (res.status === 401 || res.status === 403) {
+          blockEngine('nvidia', tier, model, keyIndex);
+          lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${msg}`;
+          continue;
+        }
+        lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${msg}`;
+        continue;
+      }
+
+      const payload = await res.json();
+      const text = payload.choices?.[0]?.message?.content || '';
+      if (!text) {
+        lastError = `NVIDIA ${model} key #${keyIndex + 1}: empty response`;
+        continue;
+      }
+
+      clearEngineBlock('nvidia', tier, model, keyIndex);
+      return {
+        success: true,
+        text,
+        meta: rememberSuccessfulCall('nvidia', model, keyIndex, tier, res.headers, nvidiaKeys.length),
+      };
+    } catch (err) {
+      lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${err.message}`;
+    }
+  }
+
+  return { success: false, error: lastError || `NVIDIA ${model}: unavailable` };
+}
+
+async function tryOpenRouterVisionModel(prompt, base64, model, tier) {
+  let lastError = '';
+  const openrouterKeys = await getProviderKeys('openrouter');
+
+  for (let keyIndex = 0; keyIndex < openrouterKeys.length; keyIndex++) {
+    if (!isEngineAvailable('openrouter', tier, model, keyIndex)) continue;
+
+    const apiKey = openrouterKeys[keyIndex];
+    try {
+      const res = await fetch(OPENROUTER_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
+            ],
+          }],
+          temperature: 0,
+          max_tokens: 500,
+        }),
+      });
+
+      if (!res.ok) {
+        const msg = await readErrorMessage(res);
+        if (res.status === 429 || /quota|rate|limit/i.test(msg)) {
+          blockEngine('openrouter', tier, model, keyIndex);
+          lastError = `OpenRouter ${model} key #${keyIndex + 1}: limit`;
+          continue;
+        }
+        if (res.status === 401 || res.status === 403) {
+          blockEngine('openrouter', tier, model, keyIndex);
+          lastError = `OpenRouter ${model} key #${keyIndex + 1}: ${msg}`;
+          continue;
+        }
+        lastError = `OpenRouter ${model} key #${keyIndex + 1}: ${msg}`;
+        continue;
+      }
+
+      const payload = await res.json();
+      const text = payload.choices?.[0]?.message?.content || '';
+      if (!text) {
+        lastError = `OpenRouter ${model} key #${keyIndex + 1}: empty response`;
+        continue;
+      }
+
+      clearEngineBlock('openrouter', tier, model, keyIndex);
+      return {
+        success: true,
+        text,
+        meta: rememberSuccessfulCall('openrouter', model, keyIndex, tier, res.headers, openrouterKeys.length),
+      };
+    } catch (err) {
+      lastError = `OpenRouter ${model} key #${keyIndex + 1}: ${err.message}`;
+    }
+  }
+
+  return { success: false, error: lastError || `OpenRouter ${model}: unavailable` };
+}
+
 async function tryGroqVisionModel(prompt, base64, model, tier) {
   let lastError = '';
   const groqKeys = await getProviderKeys('groq');
@@ -743,8 +1275,8 @@ async function tryGroqVisionModel(prompt, base64, model, tier) {
               { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } },
             ],
           }],
-          temperature: 0.1,
-          max_tokens: 600,
+          temperature: 0,
+          max_tokens: 500,
         }),
       });
 
@@ -794,81 +1326,213 @@ async function readErrorMessage(res) {
   return msg;
 }
 
+function normalizeForMatch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanModelText(text) {
+  return String(text || '')
+    .replace(/```[\s\S]*?```/g, (block) => block.replace(/```/g, ''))
+    .replace(/^\s*(?:final answer|answer)\s*[-–]\s*/i, 'ANSWER: ')
+    .trim();
+}
+
+function cleanImageAnalysisText(text) {
+  let cleaned = cleanModelText(text)
+    .replace(/\b(?:we need to|i need to|let's|first,? i|the task asks|we should)\b[\s\S]*?(?=(?:Відповідь|Ответ|Answer|Аналіз|Analysis)\s*:)/i, '')
+    .replace(/^\s*(?:Here is|Sure,? here is|I can see)\s*:?\s*/i, '')
+    .trim();
+
+  const answerLike = cleaned.match(/((?:Відповідь|Ответ|Answer|Аналіз|Analysis)\s*:[\s\S]+)/i);
+  if (answerLike) cleaned = answerLike[1].trim();
+
+  return cleaned
+    .split(/\n+/)
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .slice(0, 4)
+    .join('\n')
+    .slice(0, 900);
+}
+
+function extractAnswerParts(text) {
+  const cleaned = cleanModelText(text);
+  const answerMatch = cleaned.match(/(?:^|\n)\s*ANSWER\s*:\s*([^\n\r]+)/i);
+  const explanationMatch = cleaned.match(/(?:^|\n)\s*EXPLANATION\s*:\s*([\s\S]+)$/i);
+
+  if (answerMatch) {
+    return {
+      answerText: answerMatch[1].trim(),
+      explanation: explanationMatch ? explanationMatch[1].trim() : '',
+      cleaned,
+      hasAnswerLine: true,
+    };
+  }
+
+  const cueMatch = cleaned.match(/(?:correct answer is|answer is|the answer is|choose|select)\s*:?\s*([^\n.]+)/i);
+  return {
+    answerText: cueMatch ? cueMatch[1].trim() : '',
+    explanation: '',
+    cleaned,
+    hasAnswerLine: false,
+  };
+}
+
+function findOptionIndicesFromText(answerText, options, allowLoose) {
+  const indices = [];
+  const source = String(answerText || '');
+  const upper = source.toUpperCase();
+
+  for (const letter of upper.match(/\b[A-Z]\b/g) || []) {
+    const idx = letter.charCodeAt(0) - 65;
+    if (idx >= 0 && idx < options.length && !indices.includes(idx)) indices.push(idx);
+  }
+
+  if (!indices.length) {
+    for (const num of source.match(/\b\d+\b/g) || []) {
+      const idx = parseInt(num, 10) - 1;
+      if (idx >= 0 && idx < options.length && !indices.includes(idx)) indices.push(idx);
+    }
+  }
+
+  if (!indices.length) {
+    const normalizedAnswer = normalizeForMatch(source);
+    for (let i = 0; i < options.length; i++) {
+      const normalizedOption = normalizeForMatch(options[i]);
+      if (!normalizedOption || normalizedOption.length < 3) continue;
+      if (normalizedAnswer.includes(normalizedOption) || normalizedOption.includes(normalizedAnswer)) {
+        indices.push(i);
+        break;
+      }
+    }
+  }
+
+  if (!indices.length && allowLoose) {
+    const normalizedSource = normalizeForMatch(source);
+    let bestIdx = -1;
+    let bestScore = 0;
+    for (let i = 0; i < options.length; i++) {
+      const words = normalizeForMatch(options[i]).split(' ').filter((word) => word.length > 2);
+      if (!words.length) continue;
+      const hits = words.filter((word) => normalizedSource.includes(word)).length;
+      const score = hits / words.length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0 && bestScore >= 0.65) indices.push(bestIdx);
+  }
+
+  return indices;
+}
+
+function hasParsedAnswer(parsed, questionType) {
+  if (!parsed) return false;
+  if (questionType === 'matching') return Array.isArray(parsed.matchPairs) && parsed.matchPairs.length > 0;
+  if (questionType === 'ordering') return Array.isArray(parsed.orderIndices) && parsed.orderIndices.length > 1;
+  return Array.isArray(parsed.correctIndices) && parsed.correctIndices.length > 0;
+}
+
+// Prompt builder for different question types
+// Author: fan_world_me
 function buildPrompt(question, options, questionType, rightOptions) {
-  const list = options.map((o, i) => `${i + 1}. ${o}`).join('\n');
+  const safeOptions = Array.isArray(options) ? options : [];
+  const letters = safeOptions.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('\n');
+  const numbers = safeOptions.map((o, i) => `${i + 1}. ${o}`).join('\n');
 
   if (questionType === 'ordering') {
-    const letList = options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('\n');
-    return `Ти — асистент для тестів. Встанови правильний хронологічний/логічний порядок елементів.
+    return `Task type: ordering
 
-Завдання: ${question}
+Question:
+${question}
 
-Елементи:
-${letList}
+Elements:
+${letters}
 
-Відповідай ТІЛЬКИ у такому форматі:
-ПОРЯДОК: A, C, B, D
-ПОЯСНЕННЯ: [коротко]`;
+Choose the correct chronological/logical sequence. Return only letters from the list.
+The first characters of your response must be "ORDER:".
+
+Return EXACTLY this format (two lines only):
+ORDER: A, C, B, D
+EXPLANATION: <one short reason in the question language>`;
   }
 
   if (questionType === 'matching') {
     const rightList = (rightOptions || []).map((r, i) => `${String.fromCharCode(65 + i)}. ${r}`).join('\n');
-    return `Ти — асистент для тестів. Встанови відповідність між лівими і правими елементами.
+    return `Task type: matching
 
-Завдання: ${question}
+Question:
+${question}
 
-Ліві елементи:
-${list}
+Left elements:
+${numbers}
 
-Праві елементи:
+Right elements:
 ${rightList}
 
-Відповідай ТІЛЬКИ у такому форматі:
-ВІДПОВІДНІСТЬ:
+Match every left item to one right item. Use only numbers and letters shown above.
+The first characters of your response must be "MATCHING:".
+
+Return EXACTLY this format:
+MATCHING:
 1 -> A
 2 -> C
 3 -> B
-ПОЯСНЕННЯ: [коротко]`;
+EXPLANATION: <one short reason in the question language>`;
   }
 
   if (questionType === 'checkbox') {
-    const letList = options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('\n');
-    return `Ти — асистент для тестів. У цьому питанні може бути декілька правильних відповідей.
+    return `Task type: multiple choice with one or more correct answers
 
-Питання: ${question}
+Question:
+${question}
 
-Варіанти:
-${letList}
+Options:
+${letters}
 
-Відповідай ТІЛЬКИ у такому форматі:
-ВІДПОВІДЬ: A, C
-ПОЯСНЕННЯ: [коротко]`;
+Select every correct option. Use only letters from the option list.
+The first characters of your response must be "ANSWER:".
+
+Return EXACTLY this format (two lines only):
+ANSWER: A, C
+EXPLANATION: <one short reason in the question language>`;
   }
 
-  const letList = options.map((o, i) => `${String.fromCharCode(65 + i)}. ${o}`).join('\n');
-  return `Ти — асистент для тестів. Визнач ОДНУ правильну відповідь.
+  return `Task type: single choice
 
-Питання: ${question}
+Question:
+${question}
 
-Варіанти:
-${letList}
+Options:
+${letters}
 
-Відповідай ТІЛЬКИ у такому форматі:
-ВІДПОВІДЬ: B
-ПОЯСНЕННЯ: [коротко]`;
+Select exactly one correct option. Use only one letter from the option list.
+The first characters of your response must be "ANSWER:".
+
+Return EXACTLY this format (two lines only):
+ANSWER: <one letter>
+EXPLANATION: <one short reason in the question language>`;
 }
 
 function parseAIResponse(text, options, questionType, rightOptions) {
-  const expMatch = text.match(/(?:ПОЯСНЕННЯ|EXPLANATION)\s*:\s*(.+)/is);
-  const explanation = expMatch ? expMatch[1].trim() : text.trim();
+  options = Array.isArray(options) ? options : [];
+  rightOptions = Array.isArray(rightOptions) ? rightOptions : [];
+  const parts = extractAnswerParts(text);
+  text = parts.cleaned;
+  const explanation = parts.explanation || parts.answerText || 'AI did not return a clear ANSWER line.';
 
   if (questionType === 'matching') {
     const pairs = [];
     const lines = text.split('\n');
     let inSection = false;
     for (const line of lines) {
-      if (/ВІДПОВІДНІСТЬ|MATCHES|MATCHING/i.test(line)) { inSection = true; continue; }
-      if (/ПОЯСНЕННЯ|EXPLANATION/i.test(line)) break;
+      if (/ВІДПОВІДНІСТЬ|СООТВЕТСТВИЕ|MATCHES|MATCHING/i.test(line)) { inSection = true; continue; }
+      if (/ПОЯСНЕННЯ|ПОЯСНЕНИЕ|EXPLANATION/i.test(line)) break;
       if (!inSection && !/->/.test(line)) continue;
       const m = line.match(/(\S[\w\s.,'-]*?)\s*(?:->|→)\s*(\S[\w\s.,'-]*)/);
       if (!m) continue;
@@ -887,7 +1551,7 @@ function parseAIResponse(text, options, questionType, rightOptions) {
   }
 
   if (questionType === 'ordering') {
-    const m = text.match(/(?:ПОРЯДОК|ORDER|SEQUENCE)\s*:\s*([A-Za-z,\s]+)/i);
+    const m = text.match(/(?:ПОРЯДОК|ORDER|SEQUENCE)\s*:\s*([A-Z](?:\s*[,;>\- ]\s*[A-Z])*)/i);
     if (m) {
       const letters = m[1].trim().toUpperCase().split(/[,\s]+/).filter((l) => /^[A-Z]$/.test(l));
       const orderIndices = letters.map((l) => l.charCodeAt(0) - 65).filter((i) => i >= 0 && i < options.length);
@@ -900,19 +1564,28 @@ function parseAIResponse(text, options, questionType, rightOptions) {
   }
 
   let correctIndices = [];
-  const ansMatch = text.match(/(?:ВІДПОВІДЬ|ANSWER)\s*:\s*([A-Za-z,\s]+)/i);
-  if (ansMatch) {
-    const letters = ansMatch[1].trim().toUpperCase().split(/[,;\s]+/).filter((l) => /^[A-Z]$/.test(l));
-    correctIndices = letters.map((l) => l.charCodeAt(0) - 65).filter((i) => i >= 0 && i < options.length);
+  if (parts.answerText) {
+    correctIndices = findOptionIndicesFromText(parts.answerText, options, true);
   }
-  if (correctIndices.length === 0) {
+
+  // Fallback: search for letter patterns like "B)" or "B." or "B:" or "B,"
+  if (correctIndices.length === 0 && parts.hasAnswerLine) {
     for (let i = 0; i < options.length; i++) {
       const letter = String.fromCharCode(65 + i);
-      if (new RegExp(`\\b${letter}[.):]`).test(text.toUpperCase())) {
+      // Look for patterns: "B)", "B.", "B:", "B," - but NOT standalone letter (to avoid matching words)
+      if (new RegExp(`\\b${letter}[.):,]`, 'i').test(text)) {
         correctIndices.push(i);
         if (questionType === 'radio') break;
       }
     }
   }
+
+  // Final fallback: if the model ignored the format, try text after common answer cues only.
+  if (correctIndices.length === 0) {
+    const cueText = (text.match(/(?:correct answer is|answer is|the answer is|оберіть|виберіть|правильна відповідь)\s*:?\s*([\s\S]{1,300})/i) || [])[1] || '';
+    correctIndices = findOptionIndicesFromText(cueText, options, true);
+  }
+
   return { correctIndices, explanation, rawResponse: text };
 }
+

@@ -23,6 +23,26 @@ function Copy-BuildFiles {
   Copy-Item -Force $ManifestPath (Join-Path $TargetDir 'manifest.json')
 }
 
+function Remove-AuthFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$TargetDir
+  )
+
+  Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $TargetDir 'auth.json')
+}
+
+function Restore-LocalAuthFile {
+  param(
+    [Parameter(Mandatory = $true)][string]$SourceDir,
+    [Parameter(Mandatory = $true)][string]$TargetDir
+  )
+
+  $authPath = Join-Path $SourceDir 'auth.json'
+  if (Test-Path $authPath) {
+    Copy-Item -Force $authPath (Join-Path $TargetDir 'auth.json')
+  }
+}
+
 try {
   $projectDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
   $srcDir = Join-Path $projectDir 'src'
@@ -52,6 +72,9 @@ try {
 
   Write-Host "Creating $firefoxZip"
   Compress-Archive -Force -Path (Join-Path $firefoxUnpacked '*') -DestinationPath $firefoxZip
+
+  Remove-AuthFile -TargetDir $chromeUnpacked
+  Remove-AuthFile -TargetDir $firefoxUnpacked
 
   Write-Host 'Packaging complete.' -ForegroundColor Green
   Write-Host "Chrome folder:  $chromeUnpacked"

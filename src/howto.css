@@ -1,0 +1,119 @@
+/* Quiz AI Analyzer - User Guide Styles */
+/* Author: fan_world_me */
+/* Dark theme styling */
+
+/* Custom font - add your font file to src/ folder and update the filename below */
+@font-face {
+  font-family: 'CustomFont';
+  src: url('Monocraft.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root{
+  --bg:#040e16;
+  --panel:rgba(4,14,22,0.92);
+  --line:rgba(0,229,255,0.2);
+  --text:#00e5ff;
+  --muted:rgba(255,255,255,0.6);
+  --blue:#00e5ff;
+  --blue-dark:#00b8cc;
+  --blue-soft:rgba(0,229,255,0.1);
+  --warn-bg:rgba(255,193,7,0.1);
+  --warn-line:#ffc107;
+  --shadow:0 8px 32px rgba(0,229,255,0.15);
+  /* Change CustomFont to your font name, or remove it to use system fonts only */
+  --font-family: CustomFont, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+*{box-sizing:border-box}
+
+body{
+  margin:0;
+  font:15px/1.6 var(--font-family);
+  color:rgba(255,255,255,0.8);
+  background:#040e16;
+  padding:32px 18px 48px;
+}
+
+.wrap{max-width:860px;margin:0 auto}
+
+.hero{
+  background:linear-gradient(135deg,rgba(0,229,255,0.2),rgba(0,184,204,0.15));
+  backdrop-filter:blur(24px);
+  color:#00e5ff;
+  border-radius:24px;
+  padding:26px 24px;
+  box-shadow:var(--shadow);
+  margin-bottom:18px;
+  border:1px solid var(--line);
+}
+
+.hero h1{margin:0 0 8px;font-size:30px;line-height:1.1;color:#00e5ff}
+.hero p{margin:0;max-width:680px;opacity:.92;color:rgba(255,255,255,0.8)}
+
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+
+.chip{
+  display:inline-flex;align-items:center;padding:7px 11px;border-radius:999px;
+  background:rgba(0,229,255,0.16);font-size:12px;font-weight:700;
+  color:#00e5ff;border:1px solid rgba(0,229,255,0.3)
+}
+
+.step{
+  display:grid;
+  grid-template-columns:46px 1fr;
+  gap:16px;
+  background:var(--panel);
+  backdrop-filter:blur(24px);
+  border:1px solid var(--line);
+  border-radius:20px;
+  padding:18px;
+  margin-bottom:14px;
+  box-shadow:var(--shadow);
+}
+
+.num{
+  width:46px;height:46px;border-radius:50%;
+  display:grid;place-items:center;
+  background:rgba(0,229,255,0.3);color:#00e5ff;font-weight:800;font-size:18px;
+  border:1px solid rgba(0,229,255,0.4);
+  box-shadow:0 0 20px rgba(0,229,255,0.3);
+}
+
+h2{margin:0 0 6px;font-size:18px;line-height:1.25;color:#00e5ff}
+p{margin:0;color:rgba(255,255,255,0.8)}
+ul{margin:8px 0 0 18px;color:rgba(255,255,255,0.8)}
+li{margin:4px 0}
+
+code{
+  background:var(--blue-soft);
+  color:#00e5ff;
+  border-radius:8px;
+  padding:2px 7px;
+  font:600 13px var(--font-family);
+  border:1px solid rgba(0,229,255,0.2);
+}
+
+a{color:var(--blue);text-decoration:none}
+a:hover{color:var(--blue-dark)}
+
+.note{
+  background:var(--warn-bg);
+  border:1px solid rgba(255,193,7,0.3);
+  border-left:6px solid var(--warn-line);
+  border-radius:18px;
+  padding:16px 18px;
+  margin-top:16px;
+  box-shadow:var(--shadow);
+  backdrop-filter:blur(12px);
+}
+
+.note strong{color:#ffc107}
+
+@media (max-width:640px){
+  .hero{padding:22px 18px}
+  .hero h1{font-size:26px}
+  .step{grid-template-columns:1fr;gap:12px}
+}
