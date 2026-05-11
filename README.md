@@ -1,142 +1,90 @@
 # Quiz AI Analyzer
 
-Browser extension for analyzing quiz pages, school questions, and selected screenshot areas with multiple AI providers.
+> Browser extension that automatically analyzes quiz pages and screenshots using multiple AI providers with smart fallback.
 
-Author: `fan_world_me`
+**Author:** `fan_world_me` · **Version:** 2.1 · **Browsers:** Chrome · Firefox
+
+---
 
 ## Features
 
-- Multi-provider AI fallback: Gemini, OpenRouter, NVIDIA, Groq
-- User-selectable providers in the extension popup
-- Default provider order tuned for Ukrainian/Russian school questions
-- Screenshot analysis for both quiz and non-quiz images
-- Automatic answer highlighting on supported quiz pages
-- Auto-analysis loop with duplicate-question detection
-- Offline history for recent results
-- Answer cache to reduce repeated API calls
-- Chrome and Firefox build outputs
-- Monocraft-based UI
+| Feature | Details |
+|---|---|
+| 🤖 Multi-provider AI | Gemini · OpenRouter · NVIDIA · Groq with automatic fallback |
+| 📸 Screenshot analysis | Select any area — quiz or not, AI will analyze it |
+| ✅ Answer highlighting | Automatically highlights correct answers on supported pages |
+| 🔁 Auto-analysis loop | Detects new questions and re-analyzes without manual trigger |
+| 💾 Offline history | Recent results cached locally to reduce API calls |
+| 🌐 Supported platforms | vseosvita.ua · zno.osvita.ua · naurok.ua · Moodle · Google Forms · Kahoot · generic pages |
 
-## Default Provider Order
+---
 
-The default order is:
+## AI Providers
 
-1. Gemini
-2. OpenRouter
-3. NVIDIA
-4. Groq
+Default fallback order (optimized for Ukrainian/Russian school content):
 
-Users can enable one or more providers in the popup. If a provider is disabled, the extension skips it completely.
+1. **Gemini** — primary, best OCR and multilingual support
+2. **OpenRouter** — broad model selection
+3. **NVIDIA** — fast inference
+4. **Groq** — ultra-fast, vision fallback for screenshots
 
-## Image Analysis
+Each provider can be individually enabled or disabled from the popup. Disabled providers are skipped entirely.
 
-The screenshot tool is not limited to tests:
+---
 
-- If the selected image contains a quiz question, the extension returns an answer and a short explanation.
-- If the selected image is not a quiz, the extension returns a short visual analysis.
+## API Keys Setup
 
-Gemini Vision is used first by default because it is more reliable for OCR and Ukrainian/Russian school tasks. Groq vision can be used as a fallback when enabled.
-
-## Project Structure
-
-```text
-src/
-  background.js        AI provider logic, fallback, API calls
-  content.js           Floating panel, page detection, highlighting, screenshots
-  popup.html           Extension popup
-  popup.css            Popup styles
-  popup.js             Popup controls and provider selection
-  howto.html           Built-in help page
-  howto.css            Help page styles
-  auth.example.json    Example API key file
-  auth.json            Local secrets file, ignored by git
-  Monocraft.ttf        Bundled UI font
-  icons/               Extension icons
-  parsers/             Experimental parser modules
-manifests/
-  chrome/manifest.json
-  firefox/manifest.json
-package-extensions.ps1
-```
-
-## API Keys
-
-Create `src/auth.json` from `src/auth.example.json`:
+Copy `src/auth.example.json` to `src/auth.json` and fill in your keys:
 
 ```json
 {
-  "nvidiaKeys": ["nvapi-your_nvidia_key"],
-  "openrouterKeys": ["sk-or-v1-your_openrouter_key"],
-  "geminiKeys": ["AIzaSyYourGeminiKey"],
-  "groqKeys": ["gsk_your_groq_key"]
+  "geminiKeys":      ["AIzaSyYourGeminiKey"],
+  "openrouterKeys":  ["sk-or-v1-your_openrouter_key"],
+  "nvidiaKeys":      ["nvapi-your_nvidia_key"],
+  "groqKeys":        ["gsk_your_groq_key"]
 }
 ```
 
-Notes:
+> `src/auth.json` is git-ignored and never included in zip packages.  
+> Multiple keys per provider are supported — the extension rotates them on rate-limit errors.
 
-- `src/auth.json` is ignored by git.
-- Local unpacked builds include `auth.json` so development works.
-- Zip packages do not include `auth.json`, so secrets are not published.
-- Users can also add keys through extension storage/UI where supported.
+---
 
 ## Build
 
-Run in PowerShell from the repository root:
+Requires PowerShell. Run from the repository root:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 .\package-extensions.ps1
 ```
 
-Build output:
+Output:
 
-- `dist/chrome-unpacked`
-- `dist/firefox-unpacked`
-- `dist/quiz-ai-chrome.zip`
-- `dist/quiz-ai-firefox.zip`
-
-## Load In Browser
-
-Chrome:
-
-1. Open `chrome://extensions`
-2. Enable Developer mode
-3. Click `Load unpacked`
-4. Select `dist/chrome-unpacked`
-
-Firefox:
-
-1. Open `about:debugging#/runtime/this-firefox`
-2. Click `Load Temporary Add-on`
-3. Select `manifest.json` inside `dist/firefox-unpacked`
-
-## Git Hygiene
-
-Tracked:
-
-- `src/`
-- `manifests/`
-- `package-extensions.ps1`
-- `README.md`
-- `LICENSE`
-
-Ignored:
-
-- `src/auth.json`
-- `dist/`
-- `*.zip`
-- local IDE folders and cache folders
-- custom local fonts, except bundled `src/Monocraft.ttf`
-
-Before publishing, verify:
-
-```powershell
-git status --short
-Get-ChildItem dist -Recurse -Filter auth.json
+```
+dist/
+  chrome-unpacked/      ← load in Chrome
+  firefox-unpacked/     ← load in Firefox
+  quiz-ai-chrome.zip
+  quiz-ai-firefox.zip
 ```
 
-`auth.json` may exist in local unpacked folders, but it must not be committed and must not appear in zip packages.
+---
+
+## Load in Browser
+
+**Chrome**
+1. Go to `chrome://extensions`
+2. Enable **Developer mode**
+3. Click **Load unpacked** → select `dist/chrome-unpacked`
+
+**Firefox**
+1. Go to `about:debugging#/runtime/this-firefox`
+2. Click **Load Temporary Add-on**
+3. Select `manifest.json` inside `dist/firefox-unpacked`
+
+---
 
 ## Disclaimer
 
-AI answers can be wrong. Review results before relying on them, especially for unclear screenshots, unusual quiz layouts, or questions that depend on classroom-specific context.
+AI answers can be wrong. Always review results before relying on them, especially for unclear screenshots, unusual quiz layouts, or classroom-specific questions.
