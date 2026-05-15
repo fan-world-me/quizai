@@ -12,7 +12,7 @@
       <h1>Quiz AI Analyzer</h1>
       <p>Розширення для аналізу тестів, шкільних питань і виділених областей екрана. Працює з кількома AI-провайдерами та автоматично перемикається між ними.</p>
       <div class="chips">
-        <span class="chip">Default: Gemini -> OpenRouter -> NVIDIA -> Groq</span>
+        <span class="chip">Default: Groq -> NVIDIA -> Gemini -> OpenRouter</span>
         <span class="chip">Користувач може вимикати провайдерів</span>
         <span class="chip">Monocraft UI</span>
       </div>
@@ -32,10 +32,10 @@
         <h2>Обери провайдерів</h2>
         <p>У popup можна ввімкнути один або кілька провайдерів. За замовчуванням використовується порядок, який краще працює для українських шкільних питань:</p>
         <ul>
-          <li><code>Gemini</code> - основний рушій для тексту і скриншотів.</li>
-          <li><code>OpenRouter</code> - безкоштовний текстовий fallback.</li>
-          <li><code>NVIDIA</code> - free endpoints як запасний варіант.</li>
-          <li><code>Groq</code> - швидкий fallback і запасний vision-аналіз.</li>
+          <li><code>Groq</code> - швидкий основний рушій і запасний vision-аналіз.</li>
+          <li><code>NVIDIA</code> - дуже швидкі free endpoints як другий рушій.</li>
+          <li><code>Gemini</code> - якісний fallback для українських питань і скриншотів.</li>
+          <li><code>OpenRouter</code> - безкоштовний текстовий фінальний fallback.</li>
         </ul>
       </div>
     </section>

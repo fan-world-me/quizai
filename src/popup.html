@@ -42,12 +42,12 @@
 
         <div class="hint">
           <div class="hint-k">Порядок fallback</div>
-          <div class="hint-v" id="fallbackValue">Gemini -> OpenRouter -> NVIDIA -> Groq</div>
+          <div class="hint-v" id="fallbackValue">Groq -> NVIDIA -> Gemini -> OpenRouter</div>
         </div>
 
         <div class="hint">
           <div class="hint-k">Ключі</div>
-          <div class="hint-v" id="keyCountValue">NVIDIA: - | OpenRouter: - | Gemini: - | Groq: -</div>
+          <div class="hint-v" id="keyCountValue">Groq: - | NVIDIA: - | Gemini: - | OpenRouter: -</div>
         </div>
 
         <div class="providers">
@@ -59,6 +59,16 @@
             <button class="link-btn" id="resetProvidersBtn" type="button">Default</button>
           </div>
           <label class="provider-row">
+            <input type="checkbox" value="groq" data-provider-toggle>
+            <span>Groq</span>
+            <small>швидкий основний рушій і запасний vision-аналіз</small>
+          </label>
+          <label class="provider-row">
+            <input type="checkbox" value="nvidia" data-provider-toggle>
+            <span>NVIDIA</span>
+            <small>дуже швидкі free endpoints як другий рушій</small>
+          </label>
+          <label class="provider-row">
             <input type="checkbox" value="gemini" data-provider-toggle>
             <span>Gemini</span>
             <small>краще для українських питань і скриншотів</small>
@@ -66,17 +76,7 @@
           <label class="provider-row">
             <input type="checkbox" value="openrouter" data-provider-toggle>
             <span>OpenRouter</span>
-            <small>безкоштовний текстовий fallback</small>
-          </label>
-          <label class="provider-row">
-            <input type="checkbox" value="nvidia" data-provider-toggle>
-            <span>NVIDIA</span>
-            <small>free endpoints як запасний рушій</small>
-          </label>
-          <label class="provider-row">
-            <input type="checkbox" value="groq" data-provider-toggle>
-            <span>Groq</span>
-            <small>швидкий fallback, також може аналізувати зображення</small>
+            <small>безкоштовний текстовий фінальний fallback</small>
           </label>
         </div>
 

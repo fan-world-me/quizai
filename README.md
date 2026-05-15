@@ -1,201 +1,160 @@
 # Quiz AI Analyzer
 
-Браузерне розширення для автоматичного аналізу тестів за допомогою AI.  
-Підтримує **Chrome** та **Firefox**.
+Browser extension for AI-assisted quiz analysis. It adds a floating panel to quiz pages, detects questions and answers on supported sites, can analyze selected screen areas as images, and falls back across several AI providers.
 
-**Підтримувані платформи:** vseosvita.ua · zno.osvita.ua · naurok.ua · Moodle · Google Forms · Kahoot · будь-який сайт (generic-парсер)
+Supports Chrome/Chromium browsers and Firefox.
 
-**AI-провайдери:** NVIDIA · OpenRouter · Gemini · Groq
+## Supported Sites
 
----
+- vseosvita.ua
+- zno.osvita.ua
+- naurok.ua / naurok.com.ua
+- Moodle quiz pages
+- Google Forms
+- Kahoot
+- Classtime
+- Generic radio/checkbox/question layouts on other sites
 
-## Структура проєкту
+Vseosvita support includes regular choices, matching, ordering, and short/open text answers.
 
-```
+## AI Providers
+
+Provider fallback order:
+
+1. Groq
+2. NVIDIA
+3. Gemini
+4. OpenRouter
+
+Text and image analysis are configured in [src/background.js](src/background.js). Screenshot/area selection uses vision-capable provider paths, so questions with charts, diagrams, formulas, or nearby images should be analyzed with the **Screenshot** button.
+
+## Project Structure
+
+```text
 quaz_ai/
-├── src/                    # Вихідний код
-│   ├── background.js       # Service worker, виклики AI API
-│   ├── content.js          # Контент-скрипт, UI на сторінці
-│   ├── popup.html/js/css   # Попап розширення
-│   ├── howto.html/css      # Сторінка довідки
-│   ├── auth.json           # Ваші API-ключі (не комітити!)
-│   ├── auth.example.json   # Приклад структури ключів
-│   ├── Monocraft.ttf       # Вбудований шрифт
-│   ├── icons/              # Іконки розширення
-│   └── parsers/            # Парсери для різних платформ
-│       ├── engine.js       # Вибір парсера за hostname
-│       ├── base.js         # Базовий клас парсера
-│       ├── moodle.js
-│       ├── osvita.js
-│       ├── google-forms.js
-│       └── generic.js      # Fallback для будь-якого сайту
+├── src/
+│   ├── background.js        # AI provider calls, fallback order, model lists
+│   ├── content.js           # Floating panel, quiz detection, highlighting, screenshot selection
+│   ├── popup.html           # Extension popup markup
+│   ├── popup.css            # Popup styles
+│   ├── popup.js             # Popup settings and actions
+│   ├── howto.html           # Help page
+│   ├── howto.css            # Help page styles
+│   ├── auth.example.json    # Example API-key config
+│   ├── auth.json            # Local API keys, ignored by git
+│   ├── Monocraft.ttf        # Bundled UI font
+│   └── icons/               # Extension icons
 ├── manifests/
-│   ├── chrome/manifest.json
-│   └── firefox/manifest.json
-├── dist/                   # Зібрані файли (генерується скриптом)
-└── package-extensions.ps1  # Скрипт збірки (PowerShell)
+│   ├── chrome/manifest.json # Chrome MV3 manifest
+│   └── firefox/manifest.json# Firefox manifest
+├── dist/                    # Generated build output
+├── package-extensions.ps1   # Build/package script
+├── LICENSE
+└── README.md
 ```
 
----
+There is no separate `src/parsers/` folder anymore. Site detection and parsing logic currently lives inside [src/content.js](src/content.js).
 
-## Налаштування API-ключів
+## API Keys
 
-Скопіюйте `src/auth.example.json` у `src/auth.json` і вставте свої ключі:
+Copy [src/auth.example.json](src/auth.example.json) to `src/auth.json`, then add your keys:
 
 ```json
 {
-  "nvidiaKeys": [
-    "nvapi-ваш_ключ_тут"
-  ],
-  "openrouterKeys": [
-    "sk-or-v1-ваш_ключ_тут"
-  ],
-  "geminiKeys": [
-    "AIzaSy-перший_ключ",
-    "AIzaSy-другий_ключ"
-  ],
-  "groqKeys": [
-    "gsk_ваш_ключ_тут"
-  ]
+  "groqKeys": ["gsk_your_key_here"],
+  "nvidiaKeys": ["nvapi-your_key_here"],
+  "geminiKeys": ["AIzaSy-your_key_here"],
+  "openrouterKeys": ["sk-or-v1-your_key_here"]
 }
 ```
 
-- Можна вказати **кілька ключів** для кожного провайдера — розширення буде перемикатися між ними при помилках/лімітах.
-- Непотрібні провайдери можна залишити з порожнім масивом `[]`.
-- Порядок спроб: **Gemini → OpenRouter → NVIDIA → Groq** (fallback-ланцюжок).
+Notes:
 
-**Де отримати ключі:**
-| Провайдер | Посилання |
-|-----------|-----------|
-| Gemini | https://aistudio.google.com/app/apikey |
+- You can provide several keys per provider.
+- Empty arrays are allowed for providers you do not use.
+- `src/auth.json` is ignored by git and must not be committed.
+- The build script excludes `auth.json` from zip archives, but restores it into unpacked local folders for testing.
+
+Key pages:
+
+| Provider | URL |
+| --- | --- |
 | Groq | https://console.groq.com/keys |
 | NVIDIA | https://build.nvidia.com |
+| Gemini | https://aistudio.google.com/app/apikey |
 | OpenRouter | https://openrouter.ai/keys |
 
-> ⚠️ `auth.json` додано до `.gitignore`. Ніколи не комітьте реальні ключі.
+## Build
 
----
-
-## Збірка
-
-Потрібен **PowerShell** (вбудований у Windows).
+Run from the project root:
 
 ```powershell
-cd C:\шлях\до\quaz_ai
 .\package-extensions.ps1
 ```
 
-Скрипт створить:
-```
+Generated output:
+
+```text
 dist/
-├── chrome-unpacked/     # Розпакована версія для Chrome
-├── firefox-unpacked/    # Розпакована версія для Firefox
-├── quiz-ai-chrome.zip   # Архів для Chrome Web Store
-└── quiz-ai-firefox.zip  # Архів для Firefox Add-ons
+├── chrome-unpacked/      # Load this in Chrome/Edge/Brave developer mode
+├── firefox-unpacked/     # Load this in Firefox temporary add-on mode
+├── quiz-ai-chrome.zip    # Chrome package without auth.json
+└── quiz-ai-firefox.zip   # Firefox package without auth.json
 ```
 
-> `auth.json` **не потрапляє** до zip-архівів (видаляється скриптом автоматично), але присутній у `*-unpacked` папках для локального використання.
+## Install Locally
 
----
+Chrome, Edge, Brave:
 
-## Встановлення
+1. Open `chrome://extensions/`.
+2. Enable Developer mode.
+3. Click **Load unpacked**.
+4. Select `dist/chrome-unpacked`.
 
-### Chrome / Edge / Brave
+Firefox:
 
-1. Відкрийте `chrome://extensions/`
-2. Увімкніть **Режим розробника** (Developer mode) у правому верхньому куті
-3. Натисніть **Завантажити нерозпакований** (Load unpacked)
-4. Виберіть папку `dist/chrome-unpacked`
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on**.
+3. Select `dist/firefox-unpacked/manifest.json`.
 
-### Firefox
+After rebuilding, reload the extension and refresh the quiz tab.
 
-1. Відкрийте `about:debugging#/runtime/this-firefox`
-2. Натисніть **Завантажити тимчасовий додаток** (Load Temporary Add-on)
-3. Виберіть файл `dist/firefox-unpacked/manifest.json`
+## Main Features
 
-> Для постійного встановлення у Firefox потрібен підписаний `.xpi` — завантажте через [addons.mozilla.org](https://addons.mozilla.org) або використовуйте Firefox Developer Edition / Nightly з вимкненою перевіркою підпису.
+- Floating panel on quiz pages.
+- Auto-analysis loop when enabled.
+- Manual **Analyze** button.
+- **Screenshot** mode for image, formula, chart, and diagram questions.
+- Highlighting of detected correct answers.
+- Matching and ordering support where the site structure allows it.
+- Short/open-answer filling or highlighting.
+- Provider fallback with clear error reporting.
+- Fullscreen-aware panel and screenshot overlay.
+- Moodle secure-window handling for the extension UI.
 
----
+## Model Configuration
 
-## Кастомний шрифт
+Model lists are kept in [src/background.js](src/background.js):
 
-За замовчуванням використовується `Monocraft.ttf`.
+- `GROQ_TEXT_MODELS`
+- `GROQ_VISION_MODELS`
+- `NVIDIA_TEXT_MODELS`
+- `NVIDIA_VISION_MODELS`
+- `GEMINI_TEXT_25`, `GEMINI_TEXT_2`, `GEMINI_TEXT_15`
+- `OPENROUTER_TEXT_MODELS`
+- `OPENROUTER_VISION_MODELS`
 
-**Щоб замінити шрифт:**
+The extension tries models in array order and moves to the next provider/model when a request fails, times out, or is unavailable.
 
-1. Покладіть файл шрифту (`.ttf`, `.woff`, `.woff2`) у папку `src/`
-2. Відредагуйте `src/popup.css` — знайдіть блок `@font-face` на початку файлу:
+## Security
 
-```css
-@font-face {
-  font-family: 'CustomFont';
-  src: url('Monocraft.ttf') format('truetype'); /* ← змініть назву файлу */
-  font-weight: normal;
-  font-style: normal;
-}
-```
+- Do not commit real API keys.
+- Keep `src/auth.json` local.
+- Zipped packages are built without `auth.json`.
+- The unpacked `dist/*-unpacked` folders may include local `auth.json` for your own testing.
 
-3. Там же у `:root` оновіть змінну `--font-family`:
+## License
 
-```css
-:root {
-  --font-family: CustomFont, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-```
+[GPL-3.0](LICENSE)
 
-4. Пересоберіть розширення (`.\package-extensions.ps1`) або вручну скопіюйте файл шрифту у `dist/chrome-unpacked/` та `dist/firefox-unpacked/`.
-
----
-
-## Кастомні стилі
-
-Всі стилі попапу знаходяться у `src/popup.css`. Кольорова схема керується CSS-змінними у `:root`:
-
-```css
-:root {
-  --bg: #040e16;                        /* фон сторінки */
-  --panel: rgba(4,14,22,0.92);          /* фон карток */
-  --text: #00e5ff;                      /* основний колір тексту */
-  --muted: rgba(255,255,255,0.6);       /* приглушений текст */
-  --line: rgba(0,229,255,0.2);          /* колір рамок */
-  --blue: #00e5ff;                      /* акцентний колір */
-  --red: #ff5252;                       /* колір помилок */
-  --shadow: 0 8px 32px rgba(0,229,255,0.15); /* тінь карток */
-  --radius: 18px;                       /* заокруглення */
-}
-```
-
-Змініть ці змінні, щоб повністю перефарбувати інтерфейс без правки решти CSS.
-
----
-
-## AI-моделі
-
-Моделі задані у `src/background.js`. Щоб змінити — відредагуйте відповідні масиви:
-
-```js
-// NVIDIA
-const NVIDIA_TEXT_MODELS = ['nvidia/llama-3.3-nemotron-super-49b-v1.5', ...];
-const NVIDIA_VISION_MODELS = ['mistralai/mistral-large-3-675b-instruct-2512'];
-
-// OpenRouter
-const OPENROUTER_TEXT_MODELS = ['openai/gpt-oss-120b:free'];
-const OPENROUTER_VISION_MODELS = ['openai/gpt-oss-120b:free'];
-
-// Gemini
-const GEMINI_TEXT_25 = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
-const GEMINI_TEXT_2  = ['gemini-2.0-flash-lite', 'gemini-2.0-flash'];
-const GEMINI_TEXT_15 = ['gemini-1.5-flash-latest', 'gemini-1.5-flash'];
-
-// Groq
-const GROQ_TEXT_MODELS   = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', ...];
-const GROQ_VISION_MODELS = ['meta-llama/llama-4-scout-17b-16e-instruct', ...];
-```
-
-Розширення перебирає моделі у масиві по черзі при помилках. Перша модель — пріоритетна.
-
----
-
-## Ліцензія
-
-[GPL-3.0](LICENSE) · Author: fan_world_me
+Author: fan_world_me

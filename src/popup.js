@@ -1,7 +1,7 @@
 // Quiz AI Analyzer - Popup Script
 // Author: fan_world_me
 document.addEventListener('DOMContentLoaded', () => {
-  const DEFAULT_PROVIDERS = ['gemini', 'openrouter', 'nvidia', 'groq'];
+  const DEFAULT_PROVIDERS = ['groq', 'nvidia', 'gemini', 'openrouter'];
   const enabledToggle = document.getElementById('enabledToggle');
   const analyzeBtn = document.getElementById('analyzeBtn');
   const clearBtn = document.getElementById('clearBtn');
@@ -40,6 +40,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function ignoreExpectedLastError() {
+    if (chrome.runtime.lastError) {
+      // Content script is not available on browser pages, new tabs, or unloaded tabs.
+    }
+  }
+
   function saveProviders(providers) {
     const normalized = normalizeProviders(providers);
     setProviderToggles(normalized);
@@ -47,7 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('Провайдери оновлено', 'ok');
       chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         const tab = tabs && tabs[0];
-        if (tab && tab.id) chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_CHANGED', enabled: enabledToggle.checked }, () => {});
+        if (tab && tab.id) chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_CHANGED', enabled: enabledToggle.checked }, ignoreExpectedLastError);
       });
       loadSettings();
     });
@@ -63,14 +69,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (engineDetailValue) engineDetailValue.textContent = statusLabel;
     usageValue.textContent = settings?.usage?.remainingText || 'Немає даних';
     usageReset.textContent = settings?.usage?.resetText || 'очікує запит';
-    if (fallbackValue) fallbackValue.textContent = settings?.fallbackLabel || 'Gemini -> OpenRouter -> NVIDIA -> Groq';
+    if (fallbackValue) fallbackValue.textContent = settings?.fallbackLabel || 'Groq -> NVIDIA -> Gemini -> OpenRouter';
     setProviderToggles(settings?.enabledProviders || DEFAULT_PROVIDERS);
     if (keyCountValue) {
       const nvidiaCount = settings?.keyCounts?.nvidia ?? '-';
       const openrouterCount = settings?.keyCounts?.openrouter ?? '-';
       const geminiCount = settings?.keyCounts?.gemini ?? '-';
       const groqCount = settings?.keyCounts?.groq ?? '-';
-      keyCountValue.textContent = `NVIDIA: ${nvidiaCount} | OpenRouter: ${openrouterCount} | Gemini: ${geminiCount} | Groq: ${groqCount}`;
+      keyCountValue.textContent = `Groq: ${groqCount} | NVIDIA: ${nvidiaCount} | Gemini: ${geminiCount} | OpenRouter: ${openrouterCount}`;
     }
     if (attemptTraceValue) {
       const attempts = Array.isArray(settings?.lastAttemptTrace) ? settings.lastAttemptTrace : [];
@@ -175,7 +181,7 @@ document.addEventListener('DOMContentLoaded', () => {
               return;
             }
             setTimeout(() => {
-              chrome.tabs.sendMessage(tab.id, message);
+              chrome.tabs.sendMessage(tab.id, message, ignoreExpectedLastError);
               if (cb) cb();
             }, 700);
           }

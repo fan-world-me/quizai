@@ -424,7 +424,7 @@
     const statusLabel = settings?.statusLabel || 'Engine: auto';
     const usageLabel = settings?.usage?.remainingText || 'Немає даних';
     const usageReset = settings?.usage?.resetText || 'очікує запит';
-    const fallbackLabel = settings?.fallbackLabel || 'Gemini 2.5 -> Gemini 2 -> Groq';
+    const fallbackLabel = settings?.fallbackLabel || 'Groq -> NVIDIA -> Gemini -> OpenRouter';
     return `
 <style>
 @font-face {
@@ -926,20 +926,46 @@
       if (fabMetaEl) fabMetaEl.textContent = statusLabel;
       if (usageEl) usageEl.textContent = settings?.usage?.remainingText || 'Немає даних';
       if (usageResetEl) usageResetEl.textContent = settings?.usage?.resetText || 'очікує запит';
-      if (fallbackEl) fallbackEl.textContent = settings?.fallbackLabel || 'NVIDIA → OpenRouter → Gemini → Groq';
+      if (fallbackEl) fallbackEl.textContent = settings?.fallbackLabel || 'Groq → NVIDIA → Gemini → OpenRouter';
     }
 
     safeSendRuntimeMessage({ type: 'GET_SETTINGS' }, (s) => applyRuntimeMeta(s || {}));
     renderHistory();
 
-    let moved = false, ox = 0, oy = 0;
+    const stopOwnContextMenu = (e) => {
+      const target = e.target;
+      if (!target || !floatingPanel || !floatingPanel.contains(target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    const stopOwnRightButton = (e) => {
+      if (e.button !== 2) return;
+      const target = e.target;
+      if (!target || !floatingPanel || !floatingPanel.contains(target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    };
+    ['contextmenu', 'auxclick'].forEach((type) => {
+      window.addEventListener(type, stopOwnContextMenu, true);
+      document.addEventListener(type, stopOwnContextMenu, true);
+    });
+    ['mousedown', 'mouseup', 'pointerdown', 'pointerup'].forEach((type) => {
+      window.addEventListener(type, stopOwnRightButton, true);
+      document.addEventListener(type, stopOwnRightButton, true);
+    });
+
+    let dragCleanup = null;
+    let dragged = false, ox = 0, oy = 0, dragStartX = 0, dragStartY = 0;
+    const DRAG_THRESHOLD = 8;
     const startDrag = (cx, cy) => {
-      moved = false;
+      dragged = false;
+      dragStartX = cx; dragStartY = cy;
       const r = floatingPanel.getBoundingClientRect();
       ox = cx - r.left; oy = cy - r.top;
     };
     const moveDrag = (cx, cy) => {
-      moved = true;
+      if (!dragged && Math.hypot(cx - dragStartX, cy - dragStartY) < DRAG_THRESHOLD) return;
+      dragged = true;
       const maxX = window.innerWidth  - 60, maxY = window.innerHeight - 60;
       floatingPanel.style.setProperty('left',   Math.max(0, Math.min(cx - ox, maxX)) + 'px', 'important');
       floatingPanel.style.setProperty('top',    Math.max(0, Math.min(cy - oy, maxY)) + 'px', 'important');
@@ -947,9 +973,13 @@
       floatingPanel.style.setProperty('bottom', 'auto', 'important');
       repositionCard();
     };
-    const endDrag = () => {
+    const endDrag = (shouldToggle = true) => {
+      if (dragCleanup) { dragCleanup(); dragCleanup = null; }
       savePos(floatingPanel.getBoundingClientRect().left, floatingPanel.getBoundingClientRect().top);
-      if (!moved) togglePanel();
+      if (shouldToggle && !dragged) togglePanel();
+    };
+    const cancelDrag = () => {
+      if (dragCleanup) { dragCleanup(); dragCleanup = null; }
     };
 
     fab.addEventListener('dblclick', (e) => {
@@ -962,52 +992,81 @@
     });
     fab.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
+      if (dragCleanup) cancelDrag();
       startDrag(e.clientX, e.clientY);
-      const mv = (e) => moveDrag(e.clientX, e.clientY);
-      const up = () => { document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); endDrag(); };
-      document.addEventListener('mousemove', mv);
-      document.addEventListener('mouseup', up);
+      const mv = (ev) => {
+        ev.preventDefault();
+        moveDrag(ev.clientX, ev.clientY);
+      };
+      const up = (ev) => {
+        if (ev) ev.preventDefault();
+        endDrag(true);
+      };
+      const cancel = () => cancelDrag();
+      dragCleanup = () => {
+        document.removeEventListener('mousemove', mv, true);
+        document.removeEventListener('mouseup', up, true);
+        window.removeEventListener('blur', cancel, true);
+        document.removeEventListener('visibilitychange', cancel, true);
+      };
+      document.addEventListener('mousemove', mv, true);
+      document.addEventListener('mouseup', up, true);
+      window.addEventListener('blur', cancel, true);
+      document.addEventListener('visibilitychange', cancel, true);
       e.preventDefault();
+      e.stopPropagation();
     });
-    /* Touch: tap = toggle panel, slight move threshold = start dragging */
+    floatingPanel.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
+    /* Touch: tap = toggle panel, drag starts only after a small threshold. */
     let touchHandled = false; /* prevent ghost click after touch */
     fab.addEventListener('touchstart', (e) => {
+      if (dragCleanup) cancelDrag();
       const t = e.touches[0];
-      const startX = t.clientX, startY = t.clientY;
-      let draggingTouch = false;
-      const DRAG_THRESHOLD = 8;
-      startDrag(startX, startY);
+      if (!t) return;
+      startDrag(t.clientX, t.clientY);
       const mv = (ev) => {
         if (!ev.touches.length) return;
         const touch = ev.touches[0];
-        const dx = touch.clientX - startX;
-        const dy = touch.clientY - startY;
-        if (!draggingTouch) {
-          if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
-          draggingTouch = true;
-        }
         if (ev.cancelable) ev.preventDefault();
         moveDrag(touch.clientX, touch.clientY);
       };
       const end = (ev) => {
-        document.removeEventListener('touchmove', mv);
-        document.removeEventListener('touchend', end);
-        document.removeEventListener('touchcancel', end);
-        if (draggingTouch) {
-          if (ev.cancelable) ev.preventDefault();
-          touchHandled = true;
-          setTimeout(() => { touchHandled = false; }, 400);
-          endDrag();
-          return;
-        }
-        togglePanel();
+        if (ev && ev.cancelable) ev.preventDefault();
+        touchHandled = true;
+        setTimeout(() => { touchHandled = false; }, 400);
+        endDrag(true);
       };
-      document.addEventListener('touchmove', mv, { passive: false });
-      document.addEventListener('touchend', end, { passive: false });
-      document.addEventListener('touchcancel', end, { passive: false });
-    }, { passive: true });
+      const cancel = (ev) => {
+        if (ev && ev.cancelable) ev.preventDefault();
+        cancelDrag();
+        touchHandled = true;
+        setTimeout(() => { touchHandled = false; }, 400);
+      };
+      dragCleanup = () => {
+        document.removeEventListener('touchmove', mv, true);
+        document.removeEventListener('touchend', end, true);
+        document.removeEventListener('touchcancel', cancel, true);
+        window.removeEventListener('blur', cancel, true);
+        document.removeEventListener('visibilitychange', cancel, true);
+      };
+      document.addEventListener('touchmove', mv, { capture: true, passive: false });
+      document.addEventListener('touchend', end, { capture: true, passive: false });
+      document.addEventListener('touchcancel', cancel, { capture: true, passive: false });
+      window.addEventListener('blur', cancel, true);
+      document.addEventListener('visibilitychange', cancel, true);
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+    }, { passive: false });
     /* Suppress ghost click that fires after touchend */
-    fab.addEventListener('click', (e) => { if (touchHandled) e.stopImmediatePropagation(); });
+    fab.addEventListener('click', (e) => {
+      if (touchHandled) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      }
+    });
 
     document.addEventListener('click', (e) => {
       if (isPanelOpen && floatingPanel && !floatingPanel.contains(e.target)) closePanel();
@@ -1376,12 +1435,15 @@
   function startCapture() {
     if (captureMode) return;
     captureMode = true;
+    const previousPanelDisplay = floatingPanel ? floatingPanel.style.getPropertyValue('display') : '';
+    if (floatingPanel) floatingPanel.style.setProperty('display', 'none', 'important');
 
     const overlay = document.createElement('div');
     overlay.id = '__qaz_overlay';
     overlay.style.cssText = [
       'all:initial','position:fixed','inset:0',`z-index:${Z - 1}`,
       'cursor:crosshair','background:rgba(0,0,0,0.25)',
+      'touch-action:none','user-select:none','-webkit-user-select:none',
     ].join('!important;') + '!important;';
 
     const hint = document.createElement('div');
@@ -1399,47 +1461,113 @@
       'background:rgba(26,115,232,0.12)','pointer-events:none',`z-index:${Z}`,
     ].join('!important;') + '!important;';
 
-    document.documentElement.appendChild(overlay);
-    document.documentElement.appendChild(hint);
-    document.documentElement.appendChild(sel);
+    const overlayRoot = document.fullscreenElement || document.webkitFullscreenElement || document.documentElement;
+    overlayRoot.appendChild(overlay);
+    overlayRoot.appendChild(hint);
+    overlayRoot.appendChild(sel);
 
-    let startX = 0, startY = 0, dragging = false;
+    let startX = 0, startY = 0, lastX = 0, lastY = 0, dragging = false;
+
+    const clampPoint = (x, y) => ({
+      x: Math.max(0, Math.min(Number.isFinite(x) ? x : 0, window.innerWidth || document.documentElement.clientWidth || 1)),
+      y: Math.max(0, Math.min(Number.isFinite(y) ? y : 0, window.innerHeight || document.documentElement.clientHeight || 1)),
+    });
+
+    const updateSelection = (x, y) => {
+      const p = clampPoint(x, y);
+      lastX = p.x; lastY = p.y;
+      const w = lastX - startX, h = lastY - startY;
+      setSel(startX + (w < 0 ? w : 0), startY + (h < 0 ? h : 0), Math.abs(w), Math.abs(h));
+    };
+
+    const finishSelection = (x, y) => {
+      if (!dragging) return;
+      dragging = false;
+      const p = clampPoint(x ?? lastX, y ?? lastY);
+      lastX = p.x; lastY = p.y;
+      const x1 = Math.min(startX, lastX), y1 = Math.min(startY, lastY);
+      const x2 = Math.max(startX, lastX), y2 = Math.max(startY, lastY);
+      clean();
+      fireCaptureRequest(x1, y1, x2 - x1, y2 - y1);
+    };
+
+    const onDocMouseMove = (e) => {
+      if (!dragging) return;
+      e.preventDefault();
+      updateSelection(e.clientX, e.clientY);
+    };
+    const onDocMouseUp = (e) => {
+      if (!dragging) return;
+      e.preventDefault();
+      finishSelection(e.clientX, e.clientY);
+    };
+    const onDocTouchMove = (e) => {
+      if (!dragging || !e.touches.length) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      updateSelection(t.clientX, t.clientY);
+    };
+    const onDocTouchEnd = (e) => {
+      if (!dragging) return;
+      e.preventDefault();
+      const t = e.changedTouches && e.changedTouches[0];
+      finishSelection(t ? t.clientX : lastX, t ? t.clientY : lastY);
+    };
+    const onDocTouchCancel = (e) => {
+      if (!dragging) return;
+      e.preventDefault();
+      finishSelection(lastX, lastY);
+    };
+    const onWindowBlur = () => {
+      if (dragging) finishSelection(lastX, lastY);
+    };
 
     const clean = () => {
       overlay.remove(); hint.remove(); sel.remove();
+      if (floatingPanel) floatingPanel.style.setProperty('display', previousPanelDisplay || 'block', 'important');
       captureMode = false;
       document.removeEventListener('keydown', onEsc, true);
+      document.removeEventListener('mousemove', onDocMouseMove, true);
+      document.removeEventListener('mouseup', onDocMouseUp, true);
+      document.removeEventListener('touchmove', onDocTouchMove, true);
+      document.removeEventListener('touchend', onDocTouchEnd, true);
+      document.removeEventListener('touchcancel', onDocTouchCancel, true);
+      window.removeEventListener('blur', onWindowBlur, true);
     };
     const onEsc = (e) => { if (e.key === 'Escape') { clean(); setStat('Скасовано', ''); setTimeout(() => setStat('', ''), 1500); } };
     document.addEventListener('keydown', onEsc, true);
+    document.addEventListener('mousemove', onDocMouseMove, true);
+    document.addEventListener('mouseup', onDocMouseUp, true);
+    document.addEventListener('touchmove', onDocTouchMove, { capture: true, passive: false });
+    document.addEventListener('touchend', onDocTouchEnd, { capture: true, passive: false });
+    document.addEventListener('touchcancel', onDocTouchCancel, { capture: true, passive: false });
+    window.addEventListener('blur', onWindowBlur, true);
 
     /* ── Mouse events ── */
     overlay.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
       e.preventDefault();
+      e.stopImmediatePropagation();
       dragging = true;
-      startX = e.clientX; startY = e.clientY;
+      const p = clampPoint(e.clientX, e.clientY);
+      startX = p.x; startY = p.y; lastX = p.x; lastY = p.y;
       setSel(startX, startY, 0, 0);
     });
-    overlay.addEventListener('mousemove', (e) => {
-      if (!dragging) return;
-      const w = e.clientX - startX, h = e.clientY - startY;
-      setSel(startX + (w < 0 ? w : 0), startY + (h < 0 ? h : 0), Math.abs(w), Math.abs(h));
-    });
+    overlay.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, true);
 
     /* ── Touch events (mobile) ── */
     overlay.addEventListener('touchstart', (e) => {
       e.preventDefault();
+      e.stopImmediatePropagation();
       const t = e.touches[0];
+      if (!t) return;
       dragging = true;
-      startX = t.clientX; startY = t.clientY;
+      const p = clampPoint(t.clientX, t.clientY);
+      startX = p.x; startY = p.y; lastX = p.x; lastY = p.y;
       setSel(startX, startY, 0, 0);
-    }, { passive: false });
-    overlay.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-      if (!dragging) return;
-      const t = e.touches[0];
-      const w = t.clientX - startX, h = t.clientY - startY;
-      setSel(startX + (w < 0 ? w : 0), startY + (h < 0 ? h : 0), Math.abs(w), Math.abs(h));
     }, { passive: false });
     overlay.addEventListener('touchend', (e) => {
       if (!dragging) return;
@@ -1617,6 +1745,11 @@
     const sortQ = findSortContainers();
     if (sortQ.length) return sortQ;
 
+    if (/vseosvita\.ua/i.test(host)) {
+      const qs = detectVseosvita();
+      if (qs.length) return qs;
+    }
+
     /* ── 1. vseosvita.ua radio/checkbox ── */
     {
       const qs = [];
@@ -1782,6 +1915,86 @@
       if (qs2.length) return qs2;
     }
     return [];
+  }
+
+  function cleanVseosvitaItemText(el) {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('.numb-item,.rk-cross__item,.vr-queue-select,.test-btn_cross,input,button,script,style').forEach(n => n.remove());
+    return normalizeText(clone.textContent || '');
+  }
+
+  function findVseosvitaQuestionText(scope) {
+    const root = scope?.closest?.('.v-test-go-bg,.v-test-question,[id^="i-test-question"],.v-test-go-body') || scope?.parentElement || document;
+    const title = root.querySelector?.('.v-test-questions-title .content-box,.v-test-questions-title,strong,.content-box strong,.content-box p');
+    const text = title ? normalizeText(title.textContent || '') : '';
+    return text || findTextAbove(scope) || findTextInParent(scope) || innerQuestionText(root);
+  }
+
+  function detectVseosvita() {
+    const qs = [];
+
+    document.querySelectorAll('.v-block-answers-cross-wrapper').forEach(wrapper => {
+      if (isOwnPanel(wrapper)) return;
+      const cols = Array.from(wrapper.querySelectorAll('.v-col-6'));
+      const leftCol = cols.find(col => !col.classList.contains('v-col-last')) || cols[0];
+      const rightCol = cols.find(col => col.classList.contains('v-col-last')) || cols[1];
+      if (!leftCol || !rightCol) return;
+
+      const leftEls = Array.from(leftCol.querySelectorAll('.v-block-answers-cross-block')).filter(el => !isOwnPanel(el));
+      const rightEls = Array.from(rightCol.querySelectorAll('.v-block-answers-cross-block')).filter(el => !isOwnPanel(el));
+      const options = leftEls.map(cleanVseosvitaItemText).filter(Boolean);
+      const rightOptions = rightEls.map(cleanVseosvitaItemText).filter(Boolean);
+      const qText = findVseosvitaQuestionText(wrapper);
+      if (qText && options.length >= 2 && rightOptions.length >= 2) {
+        qs.push({
+          questionText: qText,
+          options,
+          rightOptions,
+          optionEls: leftEls,
+          leftEls,
+          rightEls,
+          containerEl: wrapper,
+          type: 'matching'
+        });
+      }
+    });
+    if (qs.length) return qs;
+
+    document.querySelectorAll('.a-test-lab-inp input[type="text"],.a-test-lab-inp textarea').forEach(input => {
+      if (isOwnPanel(input)) return;
+      const box = input.closest('.a-test-lab-inp') || input.parentElement;
+      const qText = findVseosvitaQuestionText(box);
+      if (qText) {
+        qs.push({
+          questionText: qText,
+          options: [],
+          optionEls: [input],
+          inputEl: input,
+          containerEl: box,
+          type: 'open_ended'
+        });
+      }
+    });
+    if (qs.length) return qs;
+
+    document.querySelectorAll('.t-test-questions,.row_draggable-question').forEach(container => {
+      if (isOwnPanel(container)) return;
+      const items = Array.from(container.querySelectorAll('.v-test-questions-select-block')).filter(el => !isOwnPanel(el));
+      const options = items.map(cleanVseosvitaItemText).filter(Boolean);
+      const qText = findVseosvitaQuestionText(container);
+      if (qText && options.length >= 2) {
+        qs.push({
+          questionText: qText,
+          options,
+          optionEls: items,
+          containerEl: container,
+          type: 'ordering'
+        });
+      }
+    });
+
+    return qs;
   }
 
   /* ══════════════════════════════════════════════
@@ -2278,6 +2491,15 @@
         orderItems: ans.orderIndices.map(idx => q.options[idx] || '?'),
       });
       if (onDone) onDone();
+    } else if ((q.type === 'open_ended' || q.type === 'short_answer') && (ans.answer || ans.textAnswer || ans.rawResponse)) {
+      const textAnswer = String(ans.answer || ans.textAnswer || ans.rawResponse || '').trim();
+      applyOpenAnswerHighlight(q, textAnswer);
+      lastResults.push({
+        success: true, type: 'open_ended',
+        question: q.questionText,
+        answers: [textAnswer],
+      });
+      if (onDone) onDone();
     } else if (ans.correctIndices && ans.correctIndices.length) {
       applyHighlight(q, ans);
       lastResults.push({
@@ -2332,6 +2554,26 @@
 
   /* Matching: pairs = [{left:'Foo', right:'Bar'}, ...] */
   function applyMatchHighlight(q, matchPairs) {
+    if (q.leftEls && q.rightEls) {
+      matchPairs.forEach(pair => {
+        const leftIdx = findBestTextIndex(pair.left, q.options);
+        const rightIdx = findBestTextIndex(pair.right, q.rightOptions || []);
+        const color = ['#00C851','#33b5e5','#FF8800','#aa66cc','#ff4444'][Math.max(0, leftIdx) % 5];
+        const leftEl = leftIdx >= 0 ? q.leftEls[leftIdx] : null;
+        const rightEl = rightIdx >= 0 ? q.rightEls[rightIdx] : null;
+        [leftEl, rightEl].forEach((el, partIdx) => {
+          if (!el || isOwnPanel(el)) return;
+          el.style.setProperty('outline', `4px solid ${color}`, 'important');
+          el.style.setProperty('outline-offset', '3px', 'important');
+          el.style.setProperty('box-shadow', `0 0 0 4px ${color}, inset 0 0 18px rgba(255,255,255,.1)`, 'important');
+          el.style.setProperty('position', 'relative', 'important');
+          el.setAttribute('data-qaz-hl', '1');
+          addBadge(el, partIdx === 0 ? String(leftIdx + 1) : String.fromCharCode(65 + rightIdx), color);
+        });
+      });
+      return;
+    }
+
     /* Highlight the select elements and set their values */
     if (!q.selectEls) return;
     matchPairs.forEach(pair => {
@@ -2354,6 +2596,50 @@
       sel.style.setProperty('box-shadow',  `0 0 0 3px rgba(0,200,81,.3)`, 'important');
       sel.setAttribute('data-qaz-hl', '1');
     });
+  }
+
+  function applyOpenAnswerHighlight(q, answerText) {
+    const input = q.inputEl || q.optionEls?.[0];
+    if (!input || isOwnPanel(input)) return;
+    if ('value' in input && answerText) {
+      input.value = answerText;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    input.style.setProperty('outline', `4px solid ${C_OK}`, 'important');
+    input.style.setProperty('outline-offset', '3px', 'important');
+    input.style.setProperty('box-shadow', `0 0 0 4px ${C_OK}`, 'important');
+    input.setAttribute('data-qaz-hl', '1');
+    const badgeHost = input.parentElement || q.containerEl;
+    if (badgeHost && !isOwnPanel(badgeHost)) {
+      badgeHost.style.setProperty('position', 'relative', 'important');
+      badgeHost.setAttribute('data-qaz-hl', '1');
+      addBadge(badgeHost, answerText.slice(0, 16) || 'OK', C_OK);
+    }
+  }
+
+  function findBestTextIndex(needle, haystack) {
+    const n = normalizeText(needle || '').toLowerCase();
+    if (!n || !Array.isArray(haystack)) return -1;
+    let bestIdx = -1;
+    let bestScore = 0;
+    haystack.forEach((item, idx) => {
+      const h = normalizeText(item || '').toLowerCase();
+      if (!h) return;
+      let score = 0;
+      if (h === n) score = 1;
+      else if (h.includes(n) || n.includes(h)) score = Math.min(h.length, n.length) / Math.max(h.length, n.length);
+      else {
+        const words = n.split(/\s+/).filter(Boolean);
+        const overlap = words.filter(w => h.includes(w)).length;
+        score = words.length ? overlap / words.length : 0;
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        bestIdx = idx;
+      }
+    });
+    return bestScore >= 0.25 ? bestIdx : -1;
   }
 
   function addBadge(el, text, color) {

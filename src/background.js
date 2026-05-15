@@ -2,7 +2,7 @@
 // Author: fan_world_me
 const ENGINE_COOLDOWN_MS = 15 * 60 * 1000;
 const APP_VERSION = chrome.runtime.getManifest().version;
-const FALLBACK_LABEL = 'NVIDIA → OpenRouter → Gemini → Groq';
+const FALLBACK_LABEL = 'Groq → NVIDIA → Gemini → OpenRouter';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
@@ -11,9 +11,11 @@ const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const AUTH_CONFIG_URL = chrome.runtime.getURL('auth.json');
 
 const NVIDIA_TEXT_MODELS = [
+  'nvidia/llama-3.3-nemotron-super-49b-v1',
+  'qwen/qwen3-next-80b-a3b-instruct',
+  'meta/llama-3.3-70b-instruct',
+  'nvidia/nemotron-3-nano-30b-a3b',
   'nvidia/llama-3.3-nemotron-super-49b-v1.5',
-  'mistralai/mistral-nemotron',
-  'nvidia/nemotron-mini-4b-instruct',
 ];
 const NVIDIA_VISION_MODELS = [
   'mistralai/mistral-large-3-675b-instruct-2512',
@@ -29,7 +31,13 @@ const GEMINI_VISION_25 = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
 const GEMINI_VISION_2 = ['gemini-2.0-flash-lite', 'gemini-2.0-flash'];
 const GEMINI_VISION_15 = ['gemini-1.5-flash-latest', 'gemini-1.5-flash'];
 
-const GROQ_TEXT_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'llama3-8b-8192'];
+const GROQ_TEXT_MODELS = [
+  'llama-3.1-8b-instant',
+  'qwen/qwen3-32b',
+  'openai/gpt-oss-20b',
+  'llama-3.3-70b-versatile',
+  'openai/gpt-oss-120b',
+];
 const GROQ_VISION_MODELS = [
   'meta-llama/llama-4-scout-17b-16e-instruct',
   'meta-llama/llama-4-maverick-17b-128e-instruct',
@@ -37,7 +45,7 @@ const GROQ_VISION_MODELS = [
   'llama-3.2-11b-vision-preview',
 ];
 
-const PROVIDER_ORDER = ['gemini', 'openrouter', 'nvidia', 'groq'];
+const PROVIDER_ORDER = ['groq', 'nvidia', 'gemini', 'openrouter'];
 const PROVIDER_LABELS = {
   gemini: 'Gemini',
   openrouter: 'OpenRouter',
@@ -209,15 +217,19 @@ function formatModelLabel(provider, model) {
     'gemini-1.5-flash': 'Gemini 1.5 Flash',
     'gemini-2.0-flash-lite': 'Gemini 2 Flash Lite',
     'gemini-2.0-flash': 'Gemini 2 Flash',
+    'meta/llama-3.3-70b-instruct': 'NVIDIA Llama 3.3 70B',
+    'qwen/qwen3-next-80b-a3b-instruct': 'NVIDIA Qwen3 Next 80B',
     'nvidia/nemotron-3-super-120b-a12b': 'NVIDIA Nemotron 120B',
+    'nvidia/nemotron-3-nano-30b-a3b': 'NVIDIA Nemotron 3 Nano 30B',
     'nvidia/llama-3.3-nemotron-super-49b-v1.5': 'NVIDIA Nemotron Super 49B',
-    'mistralai/mistral-nemotron': 'NVIDIA Mistral Nemotron',
-    'nvidia/nemotron-mini-4b-instruct': 'NVIDIA Nemotron Mini 4B',
+    'nvidia/llama-3.3-nemotron-super-49b-v1': 'NVIDIA Nemotron Super 49B v1',
     'mistralai/mistral-large-3-675b-instruct-2512': 'NVIDIA Mistral Large Vision',
     'openai/gpt-oss-120b:free': 'OpenRouter GPT-OSS 120B',
+    'openai/gpt-oss-120b': 'Groq GPT-OSS 120B',
+    'openai/gpt-oss-20b': 'Groq GPT-OSS 20B',
+    'qwen/qwen3-32b': 'Groq Qwen3 32B',
     'llama-3.3-70b-versatile': 'Groq Llama 3.3 70B',
     'llama-3.1-8b-instant': 'Groq Llama 3.1 8B',
-    'llama3-8b-8192': 'Groq Llama 3 8B',
     'meta-llama/llama-4-scout-17b-16e-instruct': 'Groq Llama 4 Scout',
     'meta-llama/llama-4-maverick-17b-128e-instruct': 'Groq Llama 4 Maverick',
     'llama-3.2-90b-vision-preview': 'Groq Llama 3.2 90B Vision',
@@ -572,10 +584,17 @@ function fuzzyScore(a, b) {
 // --- Rewritten handler: prefer providers for Kahoot-originated requests ---
 async function handleAnalyzeQuiz(data, sendResponse) {
   try {
+    const qType = (data.questionType || 'radio').toLowerCase();
+    if (qType === 'open_ended' || qType === 'short_answer') {
+      const r = await answerOpenEndedWithProviders(data.question);
+      if (chrome.runtime.lastError) return;
+      sendResponse({ success: true, answer: { answer: r.answer }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
+      return;
+    }
+
     // Use Kahoot-optimized flows when content signals kahoot source
     if (data && data.source && /kahoot/i.test(String(data.source))) {
       // Map question types and dispatch
-      const qType = (data.questionType || 'radio').toLowerCase();
       if (qType === 'pin_it' || qType === 'pin') {
         // Expect imageBase64 in data.imageBase64 (content capture) or ask caller to capture
         const imageBase64 = data.imageBase64 || data.base64 || null;
@@ -661,14 +680,38 @@ Your first characters must be "ANSWER:" (or "ORDER:"/"MATCHING:" for that task t
   }
 }
 
-// Fallback system tuned for school quizzes: Gemini first for multilingual accuracy, then free fallbacks.
+// Fallback system: Groq first for speed, then NVIDIA, Gemini, and OpenRouter.
 // Created by fan_world_me
 async function analyzeTextWithFallback(prompt, data) {
   const attempts = [];
   const enabledProviders = await getEnabledProviders();
 
+  if (enabledProviders.includes('groq')) {
+    // Priority 1: Groq fast text models.
+    for (const model of GROQ_TEXT_MODELS) {
+      const result = await tryGroqTextModel(prompt, model, 'text');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
+    }
+  }
+
+  if (enabledProviders.includes('nvidia')) {
+    // Priority 2: NVIDIA fast fallback endpoints.
+    for (const model of NVIDIA_TEXT_MODELS) {
+      const result = await tryNvidiaTextModel(prompt, model, 'text');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error);
+    }
+  }
+
   if (enabledProviders.includes('gemini')) {
-    // Priority 1: Gemini 2.5 Flash (newest, best quality, 20 req/day)
+    // Priority 3: Gemini for multilingual quality and screenshots.
     for (const model of GEMINI_TEXT_25) {
       const result = await tryGeminiTextModel(prompt, model, '2.5');
       if (result.success) {
@@ -678,7 +721,6 @@ async function analyzeTextWithFallback(prompt, data) {
       attempts.push(result.error);
     }
 
-    // Priority 2: Gemini 2.0 (limited quota)
     for (const model of GEMINI_TEXT_2) {
       const result = await tryGeminiTextModel(prompt, model, '2.0');
       if (result.success) {
@@ -688,7 +730,6 @@ async function analyzeTextWithFallback(prompt, data) {
       attempts.push(result.error);
     }
 
-    // Priority 3: Gemini 1.5 Flash (1500 req/day - best quota)
     for (const model of GEMINI_TEXT_15) {
       const result = await tryGeminiTextModel(prompt, model, '1.5');
       if (result.success) {
@@ -700,33 +741,9 @@ async function analyzeTextWithFallback(prompt, data) {
   }
 
   if (enabledProviders.includes('openrouter')) {
-    // Priority 4: OpenRouter free model.
+    // Priority 4: OpenRouter final text fallback.
     for (const model of OPENROUTER_TEXT_MODELS) {
       const result = await tryOpenRouterTextModel(prompt, model, 'text');
-      if (result.success) {
-        lastAttemptTrace = attempts.filter(Boolean);
-        return result;
-      }
-      attempts.push(result.error);
-    }
-  }
-
-  if (enabledProviders.includes('nvidia')) {
-    // Priority 5: NVIDIA free endpoints, kept as fallback.
-    for (const model of NVIDIA_TEXT_MODELS) {
-      const result = await tryNvidiaTextModel(prompt, model, 'text');
-      if (result.success) {
-        lastAttemptTrace = attempts.filter(Boolean);
-        return result;
-      }
-      attempts.push(result.error);
-    }
-  }
-
-  if (enabledProviders.includes('groq')) {
-    // Priority 6: Groq final fallback.
-    for (const model of GROQ_TEXT_MODELS) {
-      const result = await tryGroqTextModel(prompt, model, 'text');
       if (result.success) {
         lastAttemptTrace = attempts.filter(Boolean);
         return result;
@@ -739,7 +756,7 @@ async function analyzeTextWithFallback(prompt, data) {
   throw new Error(attempts.filter(Boolean).join('\n') || 'No available engine');
 }
 
-// Image analysis: Gemini Vision first (all keys, all models), then Groq Vision fallback.
+// Image analysis follows the same provider order: Groq, NVIDIA, Gemini, OpenRouter.
 // Author: fan_world_me
 async function analyzeImageWithFallback(base64) {
   const attempts = [];
@@ -756,7 +773,31 @@ Use this format when it is a quiz:
 Use this format when it is not a quiz:
 Аналіз: <brief description>`;
 
-  // 1. Gemini Vision — all models (2.5 → 2.0 → 1.5), all keys per model
+  // 1. Groq Vision.
+  if (enabledProviders.includes('groq')) {
+    for (const model of GROQ_VISION_MODELS) {
+      const result = await tryGroqVisionModel(prompt, base64, model, 'vision');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error || `Groq/${model}:FAIL`);
+    }
+  }
+
+  // 2. NVIDIA Vision.
+  if (enabledProviders.includes('nvidia')) {
+    for (const model of NVIDIA_VISION_MODELS) {
+      const result = await tryNvidiaVisionModel(prompt, base64, model, 'vision');
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
+      }
+      attempts.push(result.error || `NVIDIA/${model}:FAIL`);
+    }
+  }
+
+  // 3. Gemini Vision.
   if (enabledProviders.includes('gemini')) {
     for (const [models, tier] of [[GEMINI_VISION_25, 'gemini-2.5'], [GEMINI_VISION_2, 'gemini-2'], [GEMINI_VISION_15, 'gemini-1.5']]) {
       for (const model of models) {
@@ -770,25 +811,28 @@ Use this format when it is not a quiz:
     }
   }
 
-  // 2. Groq Vision fallback — all models, all keys per model
-  if (enabledProviders.includes('groq')) {
-    for (const model of GROQ_VISION_MODELS) {
-      const result = await tryGroqVisionModel(prompt, base64, model, 'vision');
+  // 4. OpenRouter Vision final fallback.
+  if (enabledProviders.includes('openrouter')) {
+    for (const model of OPENROUTER_VISION_MODELS) {
+      const result = await tryOpenRouterVisionModel(prompt, base64, model, 'vision');
       if (result.success) {
         lastAttemptTrace = attempts.filter(Boolean);
         return result;
       }
-      attempts.push(result.error || `Groq/${model}:FAIL`);
+      attempts.push(result.error || `OpenRouter/${model}:FAIL`);
     }
   }
 
   lastAttemptTrace = attempts.filter(Boolean);
-  throw new Error('No enabled vision provider could analyze the image. Enable Gemini or Groq and add a valid key.');
+  throw new Error('No enabled vision provider could analyze the image. Enable Groq, NVIDIA, Gemini, or OpenRouter and add a valid key.');
 }
 
 async function tryGeminiTextModel(prompt, model, tier) {
   let lastError = '';
   const geminiKeys = await getProviderKeys('gemini');
+  if (!geminiKeys.length) {
+    return { success: false, error: 'Gemini: no API key found' };
+  }
 
   for (let keyIndex = 0; keyIndex < geminiKeys.length; keyIndex++) {
     if (!isEngineAvailable('gemini', tier, model, keyIndex)) {
@@ -866,9 +910,15 @@ async function tryGeminiTextModel(prompt, model, tier) {
 async function tryGeminiVisionModel(prompt, base64, model, tier) {
   let lastError = '';
   const geminiKeys = await getProviderKeys('gemini');
+  if (!geminiKeys.length) {
+    return { success: false, error: 'Gemini: no API key found' };
+  }
 
   for (let keyIndex = 0; keyIndex < geminiKeys.length; keyIndex++) {
-    if (!isEngineAvailable('gemini', tier, model, keyIndex)) continue;
+    if (!isEngineAvailable('gemini', tier, model, keyIndex)) {
+      lastError = `Gemini ${tier} ${model} key #${keyIndex + 1}: blocked (cooldown)`;
+      continue;
+    }
 
     const apiKey = geminiKeys[keyIndex];
     try {
@@ -932,9 +982,15 @@ async function tryGeminiVisionModel(prompt, base64, model, tier) {
 async function tryGroqTextModel(prompt, model, tier) {
   let lastError = '';
   const groqKeys = await getProviderKeys('groq');
+  if (!groqKeys.length) {
+    return { success: false, error: 'Groq: no API key found' };
+  }
 
   for (let keyIndex = 0; keyIndex < groqKeys.length; keyIndex++) {
-    if (!isEngineAvailable('groq', tier, model, keyIndex)) continue;
+    if (!isEngineAvailable('groq', tier, model, keyIndex)) {
+      lastError = `Groq ${model} key #${keyIndex + 1}: blocked (cooldown)`;
+      continue;
+    }
 
     const apiKey = groqKeys[keyIndex];
     try {
@@ -995,14 +1051,23 @@ async function tryGroqTextModel(prompt, model, tier) {
 async function tryNvidiaTextModel(prompt, model, tier) {
   let lastError = '';
   const nvidiaKeys = await getProviderKeys('nvidia');
+  if (!nvidiaKeys.length) {
+    return { success: false, error: 'NVIDIA: no API key found' };
+  }
 
   for (let keyIndex = 0; keyIndex < nvidiaKeys.length; keyIndex++) {
-    if (!isEngineAvailable('nvidia', tier, model, keyIndex)) continue;
+    if (!isEngineAvailable('nvidia', tier, model, keyIndex)) {
+      lastError = `NVIDIA ${model} key #${keyIndex + 1}: blocked (cooldown)`;
+      continue;
+    }
 
     const apiKey = nvidiaKeys[keyIndex];
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 18000);
     try {
       const res = await fetch(NVIDIA_URL, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`,
@@ -1014,10 +1079,11 @@ async function tryNvidiaTextModel(prompt, model, tier) {
             { role: 'user', content: prompt }
           ],
           temperature: 0,
-          max_tokens: 220,
+          max_tokens: 420,
           extra_body: { thinking: { type: 'disabled' } },
         }),
       });
+      clearTimeout(timeoutId);
 
       if (!res.ok) {
         const msg = await readErrorMessage(res);
@@ -1049,7 +1115,8 @@ async function tryNvidiaTextModel(prompt, model, tier) {
         meta: rememberSuccessfulCall('nvidia', model, keyIndex, tier, res.headers, nvidiaKeys.length),
       };
     } catch (err) {
-      lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${err.message}`;
+      clearTimeout(timeoutId);
+      lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${err.name === 'AbortError' ? 'timeout' : err.message}`;
     }
   }
 
@@ -1122,9 +1189,15 @@ async function tryOpenRouterTextModel(prompt, model, tier) {
 async function tryNvidiaVisionModel(prompt, base64, model, tier) {
   let lastError = '';
   const nvidiaKeys = await getProviderKeys('nvidia');
+  if (!nvidiaKeys.length) {
+    return { success: false, error: 'NVIDIA: no API key found' };
+  }
 
   for (let keyIndex = 0; keyIndex < nvidiaKeys.length; keyIndex++) {
-    if (!isEngineAvailable('nvidia', tier, model, keyIndex)) continue;
+    if (!isEngineAvailable('nvidia', tier, model, keyIndex)) {
+      lastError = `NVIDIA ${model} key #${keyIndex + 1}: blocked (cooldown)`;
+      continue;
+    }
 
     const apiKey = nvidiaKeys[keyIndex];
     try {
@@ -1254,9 +1327,15 @@ async function tryOpenRouterVisionModel(prompt, base64, model, tier) {
 async function tryGroqVisionModel(prompt, base64, model, tier) {
   let lastError = '';
   const groqKeys = await getProviderKeys('groq');
+  if (!groqKeys.length) {
+    return { success: false, error: 'Groq: no API key found' };
+  }
 
   for (let keyIndex = 0; keyIndex < groqKeys.length; keyIndex++) {
-    if (!isEngineAvailable('groq', tier, model, keyIndex)) continue;
+    if (!isEngineAvailable('groq', tier, model, keyIndex)) {
+      lastError = `Groq ${model} key #${keyIndex + 1}: blocked (cooldown)`;
+      continue;
+    }
 
     const apiKey = groqKeys[keyIndex];
     try {
@@ -1321,9 +1400,11 @@ async function readErrorMessage(res) {
   let msg = res.statusText || `HTTP ${res.status}`;
   try {
     const data = await res.json();
-    msg = data.error?.message || msg;
+    const err = data.error || {};
+    const detail = [err.message, err.code, err.type].filter(Boolean).join(' | ');
+    msg = detail || msg;
   } catch (_) {}
-  return msg;
+  return `HTTP ${res.status}: ${msg}`;
 }
 
 function normalizeForMatch(value) {
@@ -1435,6 +1516,7 @@ function hasParsedAnswer(parsed, questionType) {
   if (!parsed) return false;
   if (questionType === 'matching') return Array.isArray(parsed.matchPairs) && parsed.matchPairs.length > 0;
   if (questionType === 'ordering') return Array.isArray(parsed.orderIndices) && parsed.orderIndices.length > 1;
+  if (questionType === 'open_ended' || questionType === 'short_answer') return !!(parsed.answer || parsed.textAnswer);
   return Array.isArray(parsed.correctIndices) && parsed.correctIndices.length > 0;
 }
 
@@ -1483,6 +1565,20 @@ MATCHING:
 1 -> A
 2 -> C
 3 -> B
+EXPLANATION: <one short reason in the question language>`;
+  }
+
+  if (questionType === 'open_ended' || questionType === 'short_answer') {
+    return `Task type: short answer / fill in the blank
+
+Question:
+${question}
+
+Give the most likely intended answer. Return only the answer text.
+The first characters of your response must be "ANSWER:".
+
+Return EXACTLY this format (two lines only):
+ANSWER: <short answer>
 EXPLANATION: <one short reason in the question language>`;
   }
 
@@ -1561,6 +1657,11 @@ function parseAIResponse(text, options, questionType, rightOptions) {
       .map((l) => l.charCodeAt(0) - 65)
       .filter((i, pos, arr) => i >= 0 && i < options.length && arr.indexOf(i) === pos);
     return { orderIndices: allLetters, explanation, rawResponse: text };
+  }
+
+  if (questionType === 'open_ended' || questionType === 'short_answer') {
+    const answer = (parts.answerText || text || '').trim().replace(/^['"]|['"]$/g, '').slice(0, 120);
+    return { answer, textAnswer: answer, explanation, rawResponse: text };
   }
 
   let correctIndices = [];
