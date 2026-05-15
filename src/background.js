@@ -448,11 +448,16 @@ async function handleAnalyzeImage(data, sendResponse) {
 }
 // --- Kahoot-adapted helpers (use existing Gemini/Groq fallback functions) ---
 
-async function answerQuestionWithProviders(title, choices) {
+async function answerQuestionWithProviders(title, choices, imageBase64 = '', mediaContext = '') {
   if (!Array.isArray(choices) || choices.length === 0) throw new Error('No answer choices provided.');
+  if (imageBase64) {
+    return answerChoiceWithVisionProviders(title, choices, 'radio', imageBase64, mediaContext);
+  }
   const numbered = choices.map((c, i) => `${i + 1}) ${c}`).join('\n');
+  const imageInfo = mediaContext ? `\nImage context:\n${mediaContext}\n` : '';
   const prompt = `Single-choice quiz.
 Question: ${title}
+${imageInfo}
 
 Options:
 ${numbered}
@@ -489,11 +494,16 @@ EXPLANATION: <short reason>`;
   return { correctIndices: [bestIdx], explanation: raw, meta: result.meta, rawResponse: raw };
 }
 
-async function answerMultiSelectWithProviders(title, choices) {
+async function answerMultiSelectWithProviders(title, choices, imageBase64 = '', mediaContext = '') {
   if (!Array.isArray(choices) || choices.length === 0) throw new Error('No answer choices provided.');
+  if (imageBase64) {
+    return answerChoiceWithVisionProviders(title, choices, 'checkbox', imageBase64, mediaContext);
+  }
   const numbered = choices.map((c, i) => `${i + 1}) ${c}`).join('\n');
+  const imageInfo = mediaContext ? `\nImage context:\n${mediaContext}\n` : '';
   const prompt = `Multi-select quiz.
 Question: ${title}
+${imageInfo}
 
 Options:
 ${numbered}
@@ -524,8 +534,20 @@ EXPLANATION: <short reason>`;
   return { correctIndices: single.correctIndices, explanation: single.explanation, meta: single.meta, rawResponse: single.rawResponse };
 }
 
-async function answerOpenEndedWithProviders(title) {
-  const prompt = `Quiz question: "${title}"\n\nThis is a fill-in-the-blank or short answer quiz question. Give the most likely intended answer. Respond with ONLY the answer — max 20 characters, no explanation.`;
+async function answerOpenEndedWithProviders(title, imageBase64 = '', mediaContext = '') {
+  if (imageBase64) {
+    const prompt = `Look at this Kahoot question screenshot and answer the short/open-ended question.
+Question text: ${title}
+${mediaContext ? `Image context:\n${mediaContext}\n` : ''}
+Return exactly:
+ANSWER: <short answer only>`;
+    const result = await analyzeImageWithFallback(imageBase64, prompt);
+    let answer = (result?.text || '').replace(/^ANSWER:\s*/i, '').trim().replace(/^['\"]|['\"]$/g, '');
+    if (answer.length > 40) answer = answer.substring(0, 40);
+    if (!answer) throw new Error('Empty answer from vision providers');
+    return { answer, meta: result.meta, rawResponse: result.text };
+  }
+  const prompt = `Quiz question: "${title}"\n${mediaContext ? `Image context:\n${mediaContext}\n` : ''}\nThis is a fill-in-the-blank or short answer quiz question. Give the most likely intended answer. Respond with ONLY the answer — max 20 characters, no explanation.`;
   const result = await analyzeTextWithFallback(prompt, {});
   let answer = (result?.text || '').trim().replace(/^['\"]|['\"]$/g, '');
   if (answer.length > 20) answer = answer.substring(0, 20);
@@ -548,27 +570,82 @@ async function answerSliderWithProviders(title, sliderConfig) {
   return { value, meta: result.meta, rawResponse: raw };
 }
 
-async function answerJumbleWithProviders(title, tiles) {
-  const tileList = tiles.map(t => `"${t}"`).join(', ');
-  const prompt = `Question: ${title}\n\nThe answer is formed by arranging these tiles in the correct order: ${tileList}\n\nWhat word or phrase do these tiles spell when arranged correctly to answer the question? Reply with ONLY the answer word/phrase. Nothing else.`;
-  const result = await analyzeTextWithFallback(prompt, {});
+async function answerJumbleWithProviders(title, tiles, imageBase64 = '', mediaContext = '') {
+  const numbered = tiles.map((t, i) => `${i + 1}) ${t}`).join('\n');
+  const prompt = `Kahoot ordering/jumble question.
+Question: ${title}
+${mediaContext ? `Image context:\n${mediaContext}\n` : ''}
+Tiles:
+${numbered}
+
+Return exactly:
+ORDER: <tile numbers in the correct order, comma-separated>
+ANSWER: <the final word or phrase>`;
+  const result = imageBase64 ? await analyzeImageWithFallback(imageBase64, prompt) : await analyzeTextWithFallback(prompt, {});
   const raw = (result?.text || '').trim().replace(/^['\"]|['\"]$/g, '');
-  return { answerWord: raw, meta: result.meta, rawResponse: result.text };
+  const orderLine = raw.match(/ORDER\s*:\s*([0-9,\s>.-]+)/i);
+  const answerLine = raw.match(/ANSWER\s*:\s*(.+)$/im);
+  const answerWord = answerLine ? answerLine[1].trim() : raw.replace(/^ANSWER:\s*/i, '').trim();
+  const nums = orderLine
+    ? [...orderLine[1].matchAll(/\d+/g)].map(m => parseInt(m[0], 10) - 1).filter(n => n >= 0 && n < tiles.length)
+    : [...raw.matchAll(/\d+/g)].map(m => parseInt(m[0], 10) - 1).filter(n => n >= 0 && n < tiles.length);
+  const uniqueNums = nums.length ? [...new Set(nums)] : [];
+  const inferred = inferJumbleOrderFromAnswer(tiles, answerWord);
+  const orderIndices = inferred.length === tiles.length ? inferred : uniqueNums;
+  return { orderIndices, answerWord, meta: result.meta, rawResponse: result.text };
 }
 
-async function answerPinWithProviders(title, imageBase64) {
-  if (!imageBase64) throw new Error('No image for pin question');
-  const res = await analyzeImageWithFallback(imageBase64);
-  // Try to parse coordinates from text
-  const raw = (res?.text || '').trim();
-  const lines = raw.split('\n').reverse();
-  for (const line of lines) {
-    const m = line.match(/(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/);
-    if (m) {
-      return { coords: { x: Math.max(0, Math.min(100, parseFloat(m[1]))), y: Math.max(0, Math.min(100, parseFloat(m[2]))) }, meta: res.meta, rawResponse: raw };
+function inferJumbleOrderFromAnswer(tiles, answerWord) {
+  const answer = String(answerWord || '').replace(/\s+/g, '').toLowerCase();
+  if (!answer) return [];
+  const remaining = tiles.map((_, idx) => idx);
+  const result = [];
+  let cursor = 0;
+  while (remaining.length) {
+    let best = -1;
+    let bestLen = -1;
+    for (const idx of remaining) {
+      const tile = String(tiles[idx] || '').replace(/\s+/g, '').toLowerCase();
+      if (!tile) continue;
+      if (answer.slice(cursor, cursor + tile.length) === tile && tile.length > bestLen) {
+        best = idx;
+        bestLen = tile.length;
+      }
     }
+    if (best < 0) return [];
+    result.push(best);
+    remaining.splice(remaining.indexOf(best), 1);
+    cursor += bestLen;
   }
-  throw new Error('Could not parse pin coordinates');
+  return cursor === answer.length ? result : [];
+}
+
+async function answerChoiceWithVisionProviders(title, choices, qType, imageBase64, mediaContext = '') {
+  const numbered = choices.map((c, i) => `${i + 1}) ${c}`).join('\n');
+  const isMulti = qType === 'checkbox' || qType === 'multiple_select_quiz';
+  const prompt = `Look at this Kahoot question screenshot. The picture may be in the question or inside one of the answers.
+Question text: ${title}
+${mediaContext ? `Image context:\n${mediaContext}\n` : ''}
+Options:
+${numbered}
+
+Return exactly:
+ANSWER: ${isMulti ? '<all correct option numbers, comma-separated>' : '<one correct option number>'}
+EXPLANATION: <short reason>`;
+  const result = await analyzeImageWithFallback(imageBase64, prompt);
+  const raw = (result?.text || '').trim();
+  const answerLine = raw.match(/ANSWER\s*:\s*([^\n]+)/i);
+  const source = answerLine ? answerLine[1] : raw;
+  const nums = [...source.matchAll(/\d+/g)]
+    .map(m => parseInt(m[0], 10) - 1)
+    .filter(n => n >= 0 && n < choices.length);
+  if (nums.length) {
+    return { correctIndices: [...new Set(isMulti ? nums : [nums[0]])], explanation: raw, meta: result.meta, rawResponse: raw };
+  }
+  const lowered = raw.toLowerCase();
+  let found = choices.findIndex(c => lowered.includes(c.toLowerCase().trim()));
+  if (found < 0) found = 0;
+  return { correctIndices: [found], explanation: raw, meta: result.meta, rawResponse: raw };
 }
 
 function fuzzyScore(a, b) {
@@ -586,7 +663,7 @@ async function handleAnalyzeQuiz(data, sendResponse) {
   try {
     const qType = (data.questionType || 'radio').toLowerCase();
     if (qType === 'open_ended' || qType === 'short_answer') {
-      const r = await answerOpenEndedWithProviders(data.question);
+      const r = await answerOpenEndedWithProviders(data.question, data.imageBase64 || '', data.mediaContext || '');
       if (chrome.runtime.lastError) return;
       sendResponse({ success: true, answer: { answer: r.answer }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
       return;
@@ -594,21 +671,6 @@ async function handleAnalyzeQuiz(data, sendResponse) {
 
     // Use Kahoot-optimized flows when content signals kahoot source
     if (data && data.source && /kahoot/i.test(String(data.source))) {
-      // Map question types and dispatch
-      if (qType === 'pin_it' || qType === 'pin') {
-        // Expect imageBase64 in data.imageBase64 (content capture) or ask caller to capture
-        const imageBase64 = data.imageBase64 || data.base64 || null;
-        if (!imageBase64) {
-          if (chrome.runtime.lastError) return;
-          sendResponse({ error: 'No image provided for pin question' });
-          return;
-        }
-        const r = await answerPinWithProviders(data.question, imageBase64);
-        if (chrome.runtime.lastError) return;
-        sendResponse({ success: true, answer: { coords: r.coords }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
-        return;
-      }
-
       if (qType === 'slider') {
         const r = await answerSliderWithProviders(data.question, data.sliderConfig || {});
         if (chrome.runtime.lastError) return;
@@ -616,15 +678,15 @@ async function handleAnalyzeQuiz(data, sendResponse) {
         return;
       }
 
-      if (qType === 'jumble') {
-        const r = await answerJumbleWithProviders(data.question, data.options || []);
+      if (qType === 'jumble' || qType === 'ordering') {
+        const r = await answerJumbleWithProviders(data.question, data.options || [], data.imageBase64 || '', data.mediaContext || '');
         if (chrome.runtime.lastError) return;
-        sendResponse({ success: true, answer: { answerWord: r.answerWord }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
+        sendResponse({ success: true, answer: { orderIndices: r.orderIndices, answerWord: r.answerWord }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
       }
 
       if (qType === 'open_ended' || qType === 'short_answer') {
-        const r = await answerOpenEndedWithProviders(data.question);
+        const r = await answerOpenEndedWithProviders(data.question, data.imageBase64 || '', data.mediaContext || '');
         if (chrome.runtime.lastError) return;
         sendResponse({ success: true, answer: { answer: r.answer }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
@@ -632,14 +694,14 @@ async function handleAnalyzeQuiz(data, sendResponse) {
 
       // Multi-select / checkbox
       if (qType === 'checkbox' || qType === 'multiple_select_quiz' || Array.isArray(data.options) && data.options.length > 4) {
-        const r = await answerMultiSelectWithProviders(data.question, data.options || []);
+        const r = await answerMultiSelectWithProviders(data.question, data.options || [], data.imageBase64 || '', data.mediaContext || '');
         if (chrome.runtime.lastError) return;
         sendResponse({ success: true, answer: { correctIndices: r.correctIndices }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
         return;
       }
 
       // Default: single-choice
-      const r = await answerQuestionWithProviders(data.question, data.options || []);
+      const r = await answerQuestionWithProviders(data.question, data.options || [], data.imageBase64 || '', data.mediaContext || '');
       if (chrome.runtime.lastError) return;
       sendResponse({ success: true, answer: { correctIndices: r.correctIndices }, meta: r.meta, statusLabel: getStatusLabel(r.meta), usage: r.meta?.usage || null });
       return;
@@ -758,11 +820,11 @@ async function analyzeTextWithFallback(prompt, data) {
 
 // Image analysis follows the same provider order: Groq, NVIDIA, Gemini, OpenRouter.
 // Author: fan_world_me
-async function analyzeImageWithFallback(base64) {
+async function analyzeImageWithFallback(base64, customPrompt = '') {
   const attempts = [];
   const enabledProviders = await getEnabledProviders();
 
-  const prompt = `Analyze this screenshot/image.
+  const prompt = customPrompt || `Analyze this screenshot/image.
 If it contains a school quiz or test question, solve it and give the answer.
 If it is not a quiz, briefly describe and analyze what is visible.
 Do not show hidden reasoning. Do not restate these instructions.

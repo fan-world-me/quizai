@@ -11,7 +11,7 @@ Supports Chrome/Chromium browsers and Firefox.
 - naurok.ua / naurok.com.ua
 - Moodle quiz pages
 - Google Forms
-- Kahoot
+- Kahoot (quiz, true/false, multi-select, jumble/ordering, open text; pin/map questions are intentionally not supported)
 - Classtime
 - Generic radio/checkbox/question layouts on other sites
 
@@ -32,25 +32,25 @@ Text and image analysis are configured in [src/background.js](src/background.js)
 
 ```text
 quaz_ai/
-├── src/
-│   ├── background.js        # AI provider calls, fallback order, model lists
-│   ├── content.js           # Floating panel, quiz detection, highlighting, screenshot selection
-│   ├── popup.html           # Extension popup markup
-│   ├── popup.css            # Popup styles
-│   ├── popup.js             # Popup settings and actions
-│   ├── howto.html           # Help page
-│   ├── howto.css            # Help page styles
-│   ├── auth.example.json    # Example API-key config
-│   ├── auth.json            # Local API keys, ignored by git
-│   ├── Monocraft.ttf        # Bundled UI font
-│   └── icons/               # Extension icons
-├── manifests/
-│   ├── chrome/manifest.json # Chrome MV3 manifest
-│   └── firefox/manifest.json# Firefox manifest
-├── dist/                    # Generated build output
-├── package-extensions.ps1   # Build/package script
-├── LICENSE
-└── README.md
+|-- src/
+|   |-- background.js        # AI provider calls, fallback order, model lists
+|   |-- content.js           # Floating panel, quiz detection, highlighting, screenshot selection
+|   |-- popup.html           # Extension popup markup
+|   |-- popup.css            # Popup styles
+|   |-- popup.js             # Popup settings and actions
+|   |-- howto.html           # Help page
+|   |-- howto.css            # Help page styles
+|   |-- auth.example.json    # Example API-key config
+|   |-- auth.json            # Local API keys, ignored by git
+|   |-- Monocraft.ttf        # Bundled UI font
+|   `-- icons/               # Extension icons
+|-- manifests/
+|   |-- chrome/manifest.json # Chrome MV3 manifest
+|   `-- firefox/manifest.json# Firefox manifest
+|-- dist/                    # Generated build output
+|-- package-extensions.ps1   # Build/package script
+|-- LICENSE
+`-- README.md
 ```
 
 There is no separate `src/parsers/` folder anymore. Site detection and parsing logic currently lives inside [src/content.js](src/content.js).
@@ -96,10 +96,10 @@ Generated output:
 
 ```text
 dist/
-├── chrome-unpacked/      # Load this in Chrome/Edge/Brave developer mode
-├── firefox-unpacked/     # Load this in Firefox temporary add-on mode
-├── quiz-ai-chrome.zip    # Chrome package without auth.json
-└── quiz-ai-firefox.zip   # Firefox package without auth.json
+|-- chrome-unpacked/      # Load this in Chrome/Edge/Brave developer mode
+|-- firefox-unpacked/     # Load this in Firefox temporary add-on mode
+|-- quiz-ai-chrome.zip    # Chrome package without auth.json
+`-- quiz-ai-firefox.zip   # Firefox package without auth.json
 ```
 
 ## Install Locally
@@ -127,6 +127,7 @@ After rebuilding, reload the extension and refresh the quiz tab.
 - **Screenshot** mode for image, formula, chart, and diagram questions.
 - Highlighting of detected correct answers.
 - Matching and ordering support where the site structure allows it.
+- Kahoot support for regular choices, multi-select, open text, and jumble/ordering. Kahoot pin/map questions are intentionally ignored.
 - Short/open-answer filling or highlighting.
 - Provider fallback with clear error reporting.
 - Fullscreen-aware panel and screenshot overlay.

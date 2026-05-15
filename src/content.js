@@ -19,6 +19,8 @@
   let autoTimer       = null;
   let currentRequestId = 0;      /* request queue management */
   let abortController = null;    /* abort old requests */
+  let kahootOverlayFrame = 0;
+  const kahootOverlayTrackers = [];
 
   const C_OK  = '#00C851';
   const C_ORG = '#FF8800';
@@ -311,7 +313,7 @@
   function buildQuestionsSignature(questions) {
     return questions.map((q) => {
       const options = (q.options || []).join('|');
-      return `${q.type || 'radio'}::${q.questionText || ''}::${options}`;
+      return `${q.type || 'radio'}::${q.questionText || ''}::${options}::${q.mediaContext || ''}`;
     }).join('##');
   }
 
@@ -413,7 +415,9 @@
     wrap.setAttribute('data-darkreader-ignore', '');
     wrap.setAttribute('data-darkreader-mode', 'ignore');
     applyWrapStyles(wrap);
-    wrap.innerHTML = buildHTML(enabled, hasKey, settings || {});
+    const tpl = document.createElement('template');
+    tpl.innerHTML = buildHTML(enabled, hasKey, settings || {});
+    wrap.appendChild(tpl.content.cloneNode(true));
     (document.body || document.documentElement).appendChild(wrap);
     floatingPanel = wrap;
     bindPanel();
@@ -1793,7 +1797,7 @@
 
     /* ── 6. Kahoot ── always return here — never fall through to generic detectors */
     if (/kahoot\.(it|com)/i.test(host)) {
-      return detectKahoot();
+      return detectKahootV2();
     }
 
     /* ── 7. Classtime ── */
@@ -2169,6 +2173,169 @@
   /* ══════════════════════════════════════════════
    * Kahoot.it
    * ══════════════════════════════════════════════ */
+  function detectKahootV2() {
+    const qText = getKahootQuestionText() || 'Kahoot question';
+    const mediaContext = getKahootMediaContext();
+    const captureEl = getKahootCaptureElement();
+    const base = { mediaContext, captureEl, containerEl: document.body, source: 'kahoot' };
+
+    const jumbleEls = Array.from(document.querySelectorAll('[data-functional-selector^="draggable-jumble-card-"]'))
+      .filter(el => !isOwnPanel(el) && isElementVisible(el));
+    const jumbleOptions = jumbleEls.map(el => cleanKahootText(el)).filter(Boolean);
+    if (jumbleOptions.length >= 2) return [{ ...base, questionText: qText, options: jumbleOptions, optionEls: jumbleEls, type: 'ordering' }];
+
+    const textInput = document.querySelector('[data-functional-selector="text-answer-input"], input[class*="open-ended-board__Input"]');
+    if (textInput && !isOwnPanel(textInput) && isElementVisible(textInput)) {
+      return [{ ...base, questionText: qText, options: [], optionEls: [textInput], inputEl: textInput, type: 'open_ended' }];
+    }
+
+    let tileBtns = Array.from(document.querySelectorAll('[data-functional-selector^="question-choice-text-"]'))
+      .map(el => findKahootChoiceTile(el))
+      .filter((el, idx, arr) => el && !isOwnPanel(el) && arr.indexOf(el) === idx);
+
+    if (tileBtns.length < 2) {
+      tileBtns = Array.from(document.querySelectorAll('[data-functional-selector^="answer-"]'))
+        .filter(el => !isOwnPanel(el) && isElementVisible(el));
+    }
+
+    if (tileBtns.length < 2) {
+      tileBtns = Array.from(document.querySelectorAll('button,li,[role="button"]')).filter(el => {
+        if (isOwnPanel(el)) return false;
+        const ds = el.getAttribute?.('data-functional-selector') || '';
+        const aria = el.getAttribute?.('aria-label') || '';
+        if (/solo-top-bar|kahoot-go-toolbar|control-bar|settings|volume|game-mode/i.test(ds + ' ' + aria)) return false;
+        const txt = cleanKahootText(el);
+        if (!txt || txt.length > 400) return false;
+        const bg = getComputedStyle(el).backgroundColor;
+        if (!bg || bg === 'transparent' || bg === 'rgba(0, 0, 0, 0)') return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 120 && rect.height > 45 && rect.top > 120;
+      });
+      if (tileBtns.length > 8) tileBtns = [];
+    }
+
+    const options = tileBtns.map(el => cleanKahootText(el)).filter(t => t.length > 0 && t.length < 800);
+    if (tileBtns.length < 2 || options.length < 2) {
+      return [{
+        questionText: 'Kahoot multiplayer: this screen may show only answer colors. Use Screenshot mode to capture the shared question screen.',
+        options: [],
+        optionEls: [],
+        containerEl: document.body,
+        type: 'radio',
+        noOptions: true,
+      }];
+    }
+
+    const requiredCount = getKahootRequiredAnswersCount();
+    const type = requiredCount > 1 ? 'checkbox' : 'radio';
+    return [{ ...base, questionText: qText, options, optionEls: tileBtns, type, requiredCount }];
+  }
+
+  function cleanKahootText(el) {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('script,style,svg,[data-functional-selector="icon"],.__qaz_badge').forEach(n => n.remove());
+    const text = normalizeText(clone.textContent || '');
+    const imageBits = Array.from(el.querySelectorAll('img')).map((img, idx) => {
+      const src = img.currentSrc || img.src || '';
+      const alt = normalizeText(img.alt || img.getAttribute('aria-label') || '');
+      if (!alt && (!src || src.startsWith('data:'))) return '';
+      return `[answer image ${idx + 1}: ${alt || 'no alt'}${src && !src.startsWith('data:') ? ` ${src}` : ''}]`;
+    }).filter(Boolean);
+    return [text, ...imageBits].filter(Boolean).join(' ');
+  }
+
+  function findKahootChoiceTile(el) {
+    let cur = el;
+    let best = el;
+    let bestArea = 0;
+    while (cur && cur !== document.body && cur !== document.documentElement) {
+      const ds = cur.getAttribute?.('data-functional-selector') || '';
+      if (/solo-top-bar|kahoot-go-toolbar|control-bar|settings|volume|game-mode/i.test(ds)) break;
+      const rect = cur.getBoundingClientRect();
+      const bg = getComputedStyle(cur).backgroundColor;
+      const area = rect.width * rect.height;
+      const isAnswer = /^answer-\d+$/.test(ds);
+      const isQuestionChoice = /^question-choice-text-\d+$/.test(ds);
+      const isJumble = /^draggable-jumble-card-\d+$/.test(ds);
+      const isClickable = cur.tagName === 'BUTTON' || cur.getAttribute?.('role') === 'button';
+      const isColored = bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)';
+      const looksLikeTile = (isAnswer || isQuestionChoice || isJumble || (isClickable && isColored) || isColored);
+      if (looksLikeTile && rect.width > 160 && rect.height > 45 && rect.top > 120 && area > bestArea) {
+        best = cur;
+        bestArea = area;
+      }
+      if (isAnswer || isJumble) break;
+      cur = cur.parentElement;
+    }
+    return best;
+  }
+
+  function getKahootRequiredAnswersCount() {
+    const el = document.querySelector('[data-functional-selector^="required-answers-count-"]');
+    if (!el) return 0;
+    const ds = el.getAttribute('data-functional-selector') || '';
+    const m = ds.match(/required-answers-count-(\d+)/);
+    if (m) return parseInt(m[1], 10) || 0;
+    const textMatch = normalizeText(el.textContent || '').match(/\d+/);
+    return textMatch ? parseInt(textMatch[0], 10) || 0 : 0;
+  }
+
+  function getKahootQuestionText() {
+    const selectors = [
+      '[data-functional-selector="block-title"]',
+      '[data-functional-selector="question-title"]',
+      '[class*="question-title"]',
+      '[class*="questionTitle"]',
+      '[class*="QuestionTitle"]',
+      '[class*="title__Title"]',
+      '[class*="titleText"]',
+      '[class*="TitleText"]',
+      '[class*="layout_title"] p',
+      '[class*="layout_title"] span',
+      '[class*="questionWrapper"] p',
+      'h1', 'h2'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (!el || isOwnPanel(el)) continue;
+      const text = normalizeText(el.textContent || '');
+      if (text.length > 2 && text.length < 600) return text;
+    }
+    const labelled = Array.from(document.querySelectorAll('[aria-label^="Quiz:"],[aria-label^="True or false:"]'))
+      .map(el => normalizeText((el.getAttribute('aria-label') || '').replace(/^(Quiz|True or false):\s*/i, '')))
+      .find(Boolean);
+    if (labelled) return labelled;
+
+    const topEls = Array.from(document.querySelectorAll('p,span,div,h1,h2,h3')).filter(el => {
+      if (isOwnPanel(el) || el.children.length > 2) return false;
+      const text = normalizeText(el.textContent || '');
+      if (text.length < 5 || text.length > 500) return false;
+      const rect = el.getBoundingClientRect();
+      return rect.top >= 0 && rect.top < window.innerHeight * 0.6;
+    });
+    topEls.sort((a, b) => normalizeText(b.textContent || '').length - normalizeText(a.textContent || '').length);
+    return topEls[0] ? normalizeText(topEls[0].textContent || '').slice(0, 400) : '';
+  }
+
+  function getKahootMediaContext() {
+    const mediaEls = Array.from(document.querySelectorAll(
+      '[data-functional-selector="media-container"] img,[data-functional-selector="media-container__media-image"],img[aria-label*="Question"][aria-label*="media"],[data-functional-selector^="question-choice-text-"] img'
+    )).filter(el => !isOwnPanel(el) && isElementVisible(el));
+    return mediaEls.slice(0, 8).map((img, idx) => {
+      const src = img.currentSrc || img.src || img.href?.baseVal || img.getAttribute?.('href') || '';
+      const alt = normalizeText(img.alt || img.getAttribute('aria-label') || '');
+      if (!alt && (!src || src.startsWith('data:'))) return '';
+      return `Image ${idx + 1}: ${alt || 'no alt'}${src && !src.startsWith('data:') ? ` (${src})` : ''}`;
+    }).filter(Boolean).join('\n');
+  }
+
+  function getKahootCaptureElement() {
+    const media = document.querySelector('[data-functional-selector="media-container"],[data-functional-selector="media-container__media-image"],[data-functional-selector^="question-choice-text-"] img');
+    const main = document.querySelector('[data-functional-selector="main-content-container"], main');
+    return media?.closest?.('main,[data-functional-selector="main-content-container"]') || main || media || null;
+  }
+
   function detectKahoot() {
     /* ── Step 1: find answer TILES via data-functional-selector ── */
     /* Kahoot names them answer-0 … answer-3 (or answer-0 … answer-5) */
@@ -2365,6 +2532,22 @@
     return null;
   }
 
+  async function captureElementForAnalysis(el) {
+    if (!el || !isElementVisible(el)) return '';
+    const rect = el.getBoundingClientRect();
+    const vw = window.innerWidth || document.documentElement.clientWidth || 1;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 1;
+    const pad = 16;
+    const x1 = Math.max(0, Math.floor(rect.left - pad));
+    const y1 = Math.max(0, Math.floor(rect.top - pad));
+    const x2 = Math.min(vw, Math.ceil(rect.right + pad));
+    const y2 = Math.min(vh, Math.ceil(rect.bottom + pad));
+    const w = x2 - x1;
+    const h = y2 - y1;
+    if (w < 40 || h < 40) return '';
+    return captureAreaBase64({ x: x1, y: y1, w, h, dpr: window.devicePixelRatio || 1 });
+  }
+
   /* ═════════════ ANALYSIS ═════════════ */
   function runAnalysis() {
     if (isAnalyzing) cancelCurrentAnalysis(false);
@@ -2430,6 +2613,7 @@
         questionType: q.type,
         source: window.location.hostname
       };
+      if (q.mediaContext) msgData.mediaContext = q.mediaContext;
       if (q.type === 'matching') {
         msgData.rightOptions = q.rightOptions;
       }
@@ -2442,7 +2626,7 @@
         return;
       }
 
-      safeSendRuntimeMessage({ type: 'ANALYZE_QUIZ', data: msgData }, (res) => {
+      const sendQuizRequest = () => safeSendRuntimeMessage({ type: 'ANALYZE_QUIZ', data: msgData }, (res) => {
         if (thisRequestId !== currentRequestId) return;
         if (res && res.success && res.answer) {
           const ans = res.answer;
@@ -2468,6 +2652,18 @@
           setTimeout(() => next(i + 1), 120);
         }
       });
+
+      if (/kahoot/i.test(window.location.hostname) && q.captureEl) {
+        captureElementForAnalysis(q.captureEl)
+          .then((base64) => {
+            if (thisRequestId !== currentRequestId) return;
+            if (base64) msgData.imageBase64 = base64;
+            sendQuizRequest();
+          })
+          .catch(() => sendQuizRequest());
+      } else {
+        sendQuizRequest();
+      }
     };
 
     next(0);
@@ -2483,12 +2679,13 @@
         pairs: ans.matchPairs,
       });
       if (onDone) onDone();
-    } else if (q.type === 'ordering' && ans.orderIndices && ans.orderIndices.length) {
-      applyOrderHighlight(q, ans.orderIndices);
+    } else if (q.type === 'ordering' && ((ans.orderIndices && ans.orderIndices.length) || ans.answerWord)) {
+      const orderIndices = ans.orderIndices && ans.orderIndices.length ? ans.orderIndices : inferOrderFromAnswerWord(q.options, ans.answerWord);
+      applyOrderHighlight(q, orderIndices);
       lastResults.push({
         success: true, type: 'ordering',
         question: q.questionText,
-        orderItems: ans.orderIndices.map(idx => q.options[idx] || '?'),
+        orderItems: orderIndices.map(idx => q.options[idx] || '?'),
       });
       if (onDone) onDone();
     } else if ((q.type === 'open_ended' || q.type === 'short_answer') && (ans.answer || ans.textAnswer || ans.rawResponse)) {
@@ -2526,7 +2723,7 @@
   function applyHighlight(q, answer) {
     answer.correctIndices.forEach(idx => {
       if (idx >= q.optionEls.length) return;
-      const el = q.optionEls[idx];
+      const el = /kahoot/i.test(String(q.source || location.hostname)) ? findKahootChoiceTile(q.optionEls[idx]) : q.optionEls[idx];
       if (!el || isOwnPanel(el)) return;
       el.style.setProperty('outline',        `4px solid ${C_OK}`, 'important');
       el.style.setProperty('outline-offset', '3px',               'important');
@@ -2538,18 +2735,56 @@
   }
 
   function applyOrderHighlight(q, orderIndices) {
+    const isKahoot = /kahoot/i.test(String(q.source || location.hostname));
+    if (isKahoot) {
+      orderIndices.forEach((itemIdx, rank) => {
+        if (itemIdx >= q.optionEls.length) return;
+        const el = findKahootChoiceTile(q.optionEls[itemIdx]);
+        if (!el || isOwnPanel(el)) return;
+        const color = ['#00C851','#33b5e5','#FF8800','#aa66cc','#ff4444'][rank % 5];
+        showKahootFixedOrderOverlay(el, rank + 1, color);
+      });
+      return;
+    }
     orderIndices.forEach((itemIdx, rank) => {
       if (itemIdx >= q.optionEls.length) return;
       const el = q.optionEls[itemIdx];
       if (!el || isOwnPanel(el)) return;
       const color = ['#00C851','#33b5e5','#FF8800','#aa66cc','#ff4444'][rank % 5];
       el.style.setProperty('outline',        `4px solid ${color}`, 'important');
-      el.style.setProperty('outline-offset', '3px',                'important');
+      el.style.setProperty('outline-offset', '3px', 'important');
       el.style.setProperty('box-shadow',     `0 0 0 4px ${color}, inset 0 0 18px rgba(255,255,255,.1)`, 'important');
       el.style.setProperty('position',       'relative',           'important');
       el.setAttribute('data-qaz-hl', '1');
       addBadge(el, String(rank + 1), color);
     });
+  }
+
+  function visuallyOrderKahootCards(q, orderIndices) {
+    // Kahoot drag/drop is stateful; changing DOM order creates broken ghost UI.
+    // Keep visual numbering on the original cards and show the order in the panel.
+  }
+
+  function inferOrderFromAnswerWord(options, answerWord) {
+    const remaining = options.map((_, idx) => idx);
+    const text = normalizeText(answerWord || '').toLowerCase();
+    const result = [];
+    while (remaining.length) {
+      let bestPos = -1;
+      let bestIndex = remaining[0];
+      remaining.forEach((idx) => {
+        const opt = normalizeText(options[idx] || '').toLowerCase();
+        const pos = opt ? text.indexOf(opt) : -1;
+        if (pos >= 0 && (bestPos < 0 || pos < bestPos)) {
+          bestPos = pos;
+          bestIndex = idx;
+        }
+      });
+      result.push(bestIndex);
+      remaining.splice(remaining.indexOf(bestIndex), 1);
+      if (bestPos < 0) result.push(...remaining.splice(0));
+    }
+    return result;
   }
 
   /* Matching: pairs = [{left:'Foo', right:'Bar'}, ...] */
@@ -2659,13 +2894,81 @@
     el.appendChild(b);
   }
 
+  function showKahootFixedOrderOverlay(el, rank, color) {
+    const rect = el.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const box = document.createElement('div');
+    box.className = '__qaz_badge';
+    box.setAttribute('data-qaz-hl', '1');
+    box.style.cssText = [
+      'all:initial','position:fixed',
+      `left:${rect.left}px`,`top:${rect.top}px`,
+      `width:${rect.width}px`,`height:${rect.height}px`,
+      'box-sizing:border-box','border-radius:10px',
+      `border:7px solid ${color}`,
+      'box-shadow:0 0 0 4px rgba(0,0,0,.25)',
+      `z-index:${Z}`,'pointer-events:none',
+    ].join('!important;') + '!important;';
+    const badge = document.createElement('div');
+    badge.textContent = String(rank);
+    badge.style.cssText = [
+      'all:initial','position:absolute','left:10px','top:10px',
+      'width:46px','height:46px','border-radius:50%',
+      `background:${color}`,'color:#fff','border:4px solid #fff',
+      'display:flex','align-items:center','justify-content:center',
+      'font:900 28px Arial,sans-serif','box-shadow:0 4px 14px rgba(0,0,0,.5)',
+      'pointer-events:none',
+    ].join('!important;') + '!important;';
+    box.appendChild(badge);
+    document.documentElement.appendChild(box);
+    kahootOverlayTrackers.push({ el, box, kind: 'card' });
+    startKahootOverlayTracking();
+  }
+
+  function startKahootOverlayTracking() {
+    if (kahootOverlayFrame) return;
+    const tick = () => {
+      kahootOverlayFrame = 0;
+      for (const item of kahootOverlayTrackers) {
+        if (!item.el || !item.box || !document.documentElement.contains(item.box)) continue;
+        const rect = item.el.getBoundingClientRect();
+        if (!rect.width || !rect.height) {
+          item.box.style.setProperty('display', 'none', 'important');
+          continue;
+        }
+        item.box.style.setProperty('display', 'block', 'important');
+        item.box.style.setProperty('left', `${rect.left}px`, 'important');
+        item.box.style.setProperty('top', `${rect.top}px`, 'important');
+        item.box.style.setProperty('width', `${rect.width}px`, 'important');
+        item.box.style.setProperty('height', `${rect.height}px`, 'important');
+      }
+      if (kahootOverlayTrackers.some(item => item.box && document.documentElement.contains(item.box))) {
+        kahootOverlayFrame = requestAnimationFrame(tick);
+      }
+    };
+    kahootOverlayFrame = requestAnimationFrame(tick);
+  }
+
   function clearAll() {
+    if (kahootOverlayFrame) {
+      cancelAnimationFrame(kahootOverlayFrame);
+      kahootOverlayFrame = 0;
+    }
+    kahootOverlayTrackers.splice(0);
     document.querySelectorAll('[data-qaz-hl]').forEach(el => {
       if (isOwnPanel(el)) return;
       el.style.removeProperty('outline');
       el.style.removeProperty('outline-offset');
       el.style.removeProperty('box-shadow');
+      el.style.removeProperty('filter');
+      el.style.removeProperty('visibility');
+      el.style.removeProperty('opacity');
+      el.style.removeProperty('pointer-events');
       el.style.removeProperty('position');
+      el.style.removeProperty('order');
+      el.style.removeProperty('gap');
+      if (el.style.display === 'flex') el.style.removeProperty('display');
+      if (el.style.flexDirection === 'column') el.style.removeProperty('flex-direction');
       el.removeAttribute('data-qaz-hl');
     });
     document.querySelectorAll('.__qaz_badge').forEach(el => el.remove());
