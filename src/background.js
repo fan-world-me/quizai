@@ -117,9 +117,35 @@ function formatProviderList(providers) {
 
 async function loadAuthConfig() {
   if (!authConfigPromise) {
-    authConfigPromise = fetch(AUTH_CONFIG_URL)
-      .then((res) => (res.ok ? res.json() : {}))
-      .catch(() => ({}));
+    authConfigPromise = (async () => {
+      try {
+        const response = await fetch(AUTH_CONFIG_URL);
+        if (response.ok) {
+          return await response.json();
+        }
+      } catch (fetchError) {
+        console.warn('fetch auth.json failed, trying XHR:', fetchError.message);
+        try {
+          return await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', AUTH_CONFIG_URL, true);
+            xhr.responseType = 'json';
+            xhr.onload = () => {
+              if (xhr.status === 200 && xhr.response) {
+                resolve(xhr.response);
+              } else {
+                reject(new Error(`XHR status ${xhr.status}`));
+              }
+            };
+            xhr.onerror = () => reject(new Error('XHR failed'));
+            xhr.send();
+          });
+        } catch (xhrError) {
+          console.warn('XHR auth.json failed:', xhrError.message);
+        }
+      }
+      return {};
+    })();
   }
   return authConfigPromise;
 }

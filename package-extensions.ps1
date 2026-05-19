@@ -67,17 +67,11 @@ try {
   Write-Host 'Preparing unpacked Firefox extension...'
   Copy-BuildFiles -SourceDir $srcDir -ManifestPath $firefoxManifest -TargetDir $firefoxUnpacked
 
-  Remove-AuthFile -TargetDir $chromeUnpacked
-  Remove-AuthFile -TargetDir $firefoxUnpacked
-
-  Write-Host "Creating $chromeZip"
+  Write-Host "Creating $chromeZip (with auth.json)"
   Compress-Archive -Force -Path (Join-Path $chromeUnpacked '*') -DestinationPath $chromeZip
 
-  Write-Host "Creating $firefoxZip"
+  Write-Host "Creating $firefoxZip (with auth.json)"
   Compress-Archive -Force -Path (Join-Path $firefoxUnpacked '*') -DestinationPath $firefoxZip
-
-  Restore-LocalAuthFile -SourceDir $srcDir -TargetDir $chromeUnpacked
-  Restore-LocalAuthFile -SourceDir $srcDir -TargetDir $firefoxUnpacked
 
   Write-Host 'Packaging complete.' -ForegroundColor Green
   Write-Host "Chrome folder:  $chromeUnpacked"
