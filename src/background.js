@@ -374,13 +374,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleTestConnection(sendResponse) {
   try {
-    const prompt = 'Test';
-    const result = await analyzeTextWithFallback(prompt, { question: 'Test', options: ['A', 'B'], questionType: 'radio' });
+    const enabledProviders = await getEnabledProviders();
+    const results = [];
+
+    for (const provider of enabledProviders) {
+      const startTime = Date.now();
+      try {
+        const keys = await getProviderKeys(provider);
+        if (!keys.length) {
+          results.push(`${PROVIDER_LABELS[provider]}: no key`);
+          continue;
+        }
+
+        const apiKey = keys[0];
+        let response;
+
+        if (provider === 'groq') {
+          response = await fetch('https://api.groq.com/openai/v1/models', {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+        } else if (provider === 'nvidia') {
+          response = await fetch('https://integrate.api.nvidia.com/v1/models', {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+        } else if (provider === 'gemini') {
+          response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+        } else if (provider === 'openrouter') {
+          response = await fetch('https://openrouter.ai/api/v1/models', {
+            headers: { 'Authorization': `Bearer ${apiKey}` }
+          });
+        }
+
+        const elapsed = Date.now() - startTime;
+        if (response && response.ok) {
+          results.push(`${PROVIDER_LABELS[provider]}: ${elapsed}ms`);
+        } else {
+          results.push(`${PROVIDER_LABELS[provider]}: error ${response?.status || 'unknown'}`);
+        }
+      } catch (err) {
+        const elapsed = Date.now() - startTime;
+        results.push(`${PROVIDER_LABELS[provider]}: ${err.message} (${elapsed}ms)`);
+      }
+    }
+
     if (chrome.runtime.lastError) return;
     sendResponse({
       success: true,
-      provider: result.meta?.provider || 'Unknown',
-      model: result.meta?.model || 'Unknown'
+      provider: results.join(' | ')
     });
   } catch (err) {
     if (chrome.runtime.lastError) return;

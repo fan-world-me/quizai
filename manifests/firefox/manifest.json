@@ -43,7 +43,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["Monocraft.ttf"],
+      "resources": ["Monocraft.ttf", "auth.json"],
       "matches": ["<all_urls>"]
     }
   ],
