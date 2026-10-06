@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Quiz AI Analyzer",
-  "version": "2.2",
+  "version": "2.8",
   "description": "Автоаналіз тестів: vseosvita.ua, zno.osvita.ua, naurok.ua, Moodle, Google Forms, Kahoot та інші. Аналіз зображень. Groq / NVIDIA / Gemini / OpenRouter AI. Author: fan_world_me",
   "permissions": [
     "activeTab",
