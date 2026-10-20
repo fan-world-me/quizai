@@ -1,4 +1,4 @@
-﻿// Quiz AI Analyzer - Background Service Worker
+// Quiz AI Analyzer - Background Service Worker
 // Author: fan_world_me
 const ENGINE_COOLDOWN_MS = 15 * 60 * 1000;
 const APP_VERSION = chrome.runtime.getManifest().version;
@@ -10,39 +10,38 @@ const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const AUTH_CONFIG_URL = chrome.runtime.getURL('auth.json');
 
+// Model IDs checked against provider docs on 2026-10-20.
+// NVIDIA NIM retired llama-3.3-70b, qwen3-next-80b, nemotron-3-nano-30b, nemotron-super-49b v1/v1.5
+// and mistral-large-3 (HTTP 410 Gone, EOL 07-09.2026). Live: the Nemotron 3.x family.
 const NVIDIA_TEXT_MODELS = [
-  'nvidia/llama-3.3-nemotron-super-49b-v1',
-  'qwen/qwen3-next-80b-a3b-instruct',
-  'meta/llama-3.3-70b-instruct',
-  'nvidia/nemotron-3-nano-30b-a3b',
-  'nvidia/llama-3.3-nemotron-super-49b-v1.5',
+  'nvidia/nemotron-3.5-lightning-30b-a3b',
+  'nvidia/nemotron-3-ultra-550b-a55b',
 ];
 const NVIDIA_VISION_MODELS = [
-  'mistralai/mistral-large-3-675b-instruct-2512',
+  'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
+  'nvidia/cosmos3-nano-reasoner',
 ];
 
-const OPENROUTER_TEXT_MODELS = ['openai/gpt-oss-120b:free'];
-const OPENROUTER_VISION_MODELS = ['openai/gpt-oss-120b:free'];
+// OpenRouter free tier. gpt-oss is text-only, so vision uses Gemma 4 / Nemotron Omni.
+const OPENROUTER_TEXT_MODELS = ['openai/gpt-oss-120b:free', 'nvidia/nemotron-3-ultra-550b-a55b:free'];
+const OPENROUTER_VISION_MODELS = ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'];
 
-// gemini-2.0-* and gemini-1.5-* were shut down by Google (06.2026 / 09.2025).
-// gemini-2.5-* is still live but scheduled to shut down no earlier than 10.2026.
-// gemini-3.5 / 3.6 are the current GA generation as of 09.2026.
-const GEMINI_TEXT_25 = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
-const GEMINI_TEXT_36 = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
-const GEMINI_VISION_25 = ['gemini-2.5-flash-lite', 'gemini-2.5-flash'];
-const GEMINI_VISION_36 = ['gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+// Gemini: 2.0 is shut down; 2.5-* is limited to users who already used it (404 for new keys);
+// gemini-3.5-flash is a deprecated alias of 3.6. Current: 3.5-flash-lite (default thinking: minimal)
+// and 3.8-flash (lowest thinking level it accepts: low).
+const GEMINI_TEXT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+const GEMINI_VISION_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+const GEMINI_TIER = 'gemini-3';
 
-// llama-3.1-8b-instant and llama-3.3-70b-versatile are Enterprise-only since 06.2026.
-// qwen/qwen3-32b, llama-4-scout/maverick and llama-3.2-*-vision-preview are decommissioned.
+// Groq: llama-3.1-8b-instant and llama-3.3-70b-versatile are Enterprise-only (08.2026);
+// qwen3-32b, llama-4-*, qwen3.6-27b and groq/compound(-mini) are shut down (07-09.2026).
+// gpt-oss-* are text-only; qwen3.8-27b is the only Groq vision model.
 const GROQ_TEXT_MODELS = [
   'openai/gpt-oss-20b',
   'openai/gpt-oss-120b',
-  'qwen/qwen3.6-27b',
   'qwen/qwen3.8-27b',
-  'groq/compound-mini',
 ];
 const GROQ_VISION_MODELS = [
-  'qwen/qwen3.6-27b',
   'qwen/qwen3.8-27b',
 ];
 
@@ -57,11 +56,25 @@ const QUIZ_SYSTEM_PROMPT = 'You solve quiz questions. The first characters of yo
 const OCR_SYSTEM_PROMPT = 'You are an OCR engine for quiz screenshots. Extract visible text exactly. Preserve language, letters, numbers, and option labels. Do not translate or explain.';
 
 const engineState = new Map();
-// Qwen 3.x models on Groq default to "thinking" mode; reasoning_effort:"none"
-// switches them to non-thinking mode (faster, no <think> block). Not supported
-// by other Groq models (gpt-oss uses low/medium/high and can't be fully disabled).
-function isQwenReasoningModel(model) {
-  return /^qwen\//i.test(model);
+// Thinking is not needed for quiz answers, so it is switched off (or minimised) per provider docs:
+//  - Groq qwen3.8: reasoning_effort "none". gpt-oss can't be fully disabled -> "low" + include_reasoning:false.
+//  - NVIDIA Nemotron 3.x: chat_template_kwargs.enable_thinking=false (top-level field of the raw JSON body).
+//  - Gemini 3.x: thinkingConfig.thinkingLevel "minimal" (Flash-Lite / 3.6); 3.8 Flash rejects "minimal" -> "low".
+//  - OpenRouter: reasoning.enabled=false (gpt-oss: effort low, excluded from the response).
+function groqReasoningParams(model) {
+  if (/^qwen\//i.test(model)) return { reasoning_effort: 'none' };
+  if (/gpt-oss/i.test(model)) return { reasoning_effort: 'low', include_reasoning: false };
+  return {};
+}
+function nvidiaReasoningParams(model) {
+  return /nemotron/i.test(model) ? { chat_template_kwargs: { enable_thinking: false } } : {};
+}
+function geminiThinkingConfig(model) {
+  return { thinkingLevel: /lite|3\.6|3\.5/i.test(model) ? 'minimal' : 'low' };
+}
+function openRouterReasoningParams(model) {
+  if (/gpt-oss/i.test(model)) return { reasoning: { effort: 'low', exclude: true } };
+  return { reasoning: { enabled: false } };
 }
 let lastMeta = null;
 let lastUsage = null;
@@ -240,33 +253,20 @@ function isEngineAvailable(provider, tier, model, keyIndex) {
 
 function formatModelLabel(provider, model) {
   const known = {
-    'gemini-2.5-pro': 'Gemini 2.5 Pro',
-    'gemini-2.5-flash-native-audio-preview-12-2025': 'Gemini 2.5 Flash Audio 12-2025',
-    'gemini-2.5-flash-native-audio-preview-09-2025': 'Gemini 2.5 Flash Audio 09-2025',
-    'gemini-2.5-flash-native-audio-latest': 'Gemini 2.5 Flash Audio Latest',
-    'gemini-2.5-flash-lite': 'Gemini 2.5 Flash Lite',
-    'gemini-2.5-flash': 'Gemini 2.5 Flash',
-    'gemini-1.5-flash-latest': 'Gemini 1.5 Flash Latest',
-    'gemini-1.5-flash': 'Gemini 1.5 Flash',
-    'gemini-2.0-flash-lite': 'Gemini 2 Flash Lite',
-    'gemini-2.0-flash': 'Gemini 2 Flash',
-    'meta/llama-3.3-70b-instruct': 'NVIDIA Llama 3.3 70B',
-    'qwen/qwen3-next-80b-a3b-instruct': 'NVIDIA Qwen3 Next 80B',
-    'nvidia/nemotron-3-super-120b-a12b': 'NVIDIA Nemotron 120B',
-    'nvidia/nemotron-3-nano-30b-a3b': 'NVIDIA Nemotron 3 Nano 30B',
-    'nvidia/llama-3.3-nemotron-super-49b-v1.5': 'NVIDIA Nemotron Super 49B',
-    'nvidia/llama-3.3-nemotron-super-49b-v1': 'NVIDIA Nemotron Super 49B v1',
-    'mistralai/mistral-large-3-675b-instruct-2512': 'NVIDIA Mistral Large Vision',
+    'gemini-3.5-flash-lite': 'Gemini 3.5 Flash Lite',
+    'gemini-3.6-flash': 'Gemini 3.6 Flash',
+    'gemini-3.8-flash': 'Gemini 3.8 Flash',
+    'nvidia/nemotron-3-ultra-550b-a55b': 'NVIDIA Nemotron Ultra 550B',
+    'nvidia/nemotron-3.5-lightning-30b-a3b': 'NVIDIA Nemotron Lightning 30B',
+    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 'NVIDIA Nemotron Omni 30B',
+    'nvidia/cosmos3-nano-reasoner': 'NVIDIA Cosmos3 Nano',
     'openai/gpt-oss-120b:free': 'OpenRouter GPT-OSS 120B',
+    'nvidia/nemotron-3-ultra-550b-a55b:free': 'OpenRouter Nemotron Ultra 550B',
+    'google/gemma-4-31b-it:free': 'OpenRouter Gemma 4 31B',
+    'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': 'OpenRouter Nemotron Omni 30B',
     'openai/gpt-oss-120b': 'Groq GPT-OSS 120B',
     'openai/gpt-oss-20b': 'Groq GPT-OSS 20B',
-    'qwen/qwen3-32b': 'Groq Qwen3 32B',
-    'llama-3.3-70b-versatile': 'Groq Llama 3.3 70B',
-    'llama-3.1-8b-instant': 'Groq Llama 3.1 8B',
-    'meta-llama/llama-4-scout-17b-16e-instruct': 'Groq Llama 4 Scout',
-    'meta-llama/llama-4-maverick-17b-128e-instruct': 'Groq Llama 4 Maverick',
-    'llama-3.2-90b-vision-preview': 'Groq Llama 3.2 90B Vision',
-    'llama-3.2-11b-vision-preview': 'Groq Llama 3.2 11B Vision',
+    'qwen/qwen3.8-27b': 'Groq Qwen3.8 27B',
   };
   return known[model] || `${provider.toUpperCase()} ${model}`;
 }
@@ -790,7 +790,7 @@ async function handleAnalyzeQuiz(data, sendResponse) {
 
 The previous response ignored the format. Reply now with the final answer only.
 Your first characters must be "ANSWER:" (or "ORDER:"/"MATCHING:" for that task type).`;
-      const retry = await tryGeminiTextModel(retryPrompt, GEMINI_TEXT_25[0], '2.5');
+      const retry = await tryGeminiTextModel(retryPrompt, GEMINI_TEXT_MODELS[0], GEMINI_TIER);
       if (retry.success) {
         const retryParsed = parseAIResponse(retry.text, data.options, data.questionType || 'radio', data.rightOptions);
         if (hasParsedAnswer(retryParsed, data.questionType || 'radio')) {
@@ -847,17 +847,8 @@ async function analyzeTextWithFallback(prompt, data) {
 
   if (enabledProviders.includes('gemini')) {
     // Priority 3: Gemini for multilingual quality and screenshots.
-    for (const model of GEMINI_TEXT_25) {
-      const result = await tryGeminiTextModel(prompt, model, '2.5');
-      if (result.success) {
-        lastAttemptTrace = attempts.filter(Boolean);
-        return result;
-      }
-      attempts.push(result.error);
-    }
-
-    for (const model of GEMINI_TEXT_36) {
-      const result = await tryGeminiTextModel(prompt, model, '3.6');
+    for (const model of GEMINI_TEXT_MODELS) {
+      const result = await tryGeminiTextModel(prompt, model, GEMINI_TIER);
       if (result.success) {
         lastAttemptTrace = attempts.filter(Boolean);
         return result;
@@ -925,15 +916,13 @@ Use this format when it is not a quiz:
 
   // 3. Gemini Vision.
   if (enabledProviders.includes('gemini')) {
-    for (const [models, tier] of [[GEMINI_VISION_25, 'gemini-2.5'], [GEMINI_VISION_36, 'gemini-3.6']]) {
-      for (const model of models) {
-        const result = await tryGeminiVisionModel(prompt, base64, model, tier);
-        if (result.success) {
-          lastAttemptTrace = attempts.filter(Boolean);
-          return result;
-        }
-        attempts.push(result.error || `Gemini/${model}:FAIL`);
+    for (const model of GEMINI_VISION_MODELS) {
+      const result = await tryGeminiVisionModel(prompt, base64, model, GEMINI_TIER);
+      if (result.success) {
+        lastAttemptTrace = attempts.filter(Boolean);
+        return result;
       }
+      attempts.push(result.error || `Gemini/${model}:FAIL`);
     }
   }
 
@@ -977,7 +966,7 @@ async function tryGeminiTextModel(prompt, model, tier) {
             parts: [{ text: QUIZ_SYSTEM_PROMPT }]
           },
           contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 220 },
+          generationConfig: { temperature: 0, maxOutputTokens: /lite/i.test(model) ? 220 : 1024, thinkingConfig: geminiThinkingConfig(model) },
           safetySettings: [
             { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_NONE' },
             { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_NONE' },
@@ -1059,7 +1048,7 @@ async function tryGeminiVisionModel(prompt, base64, model, tier) {
             { text: prompt },
             { inlineData: { mimeType: 'image/jpeg', data: base64 } },
           ] }],
-          generationConfig: { temperature: 0, maxOutputTokens: 800 },
+          generationConfig: { temperature: 0, maxOutputTokens: /lite/i.test(model) ? 800 : 1500, thinkingConfig: geminiThinkingConfig(model) },
         }),
       });
 
@@ -1133,8 +1122,8 @@ async function tryGroqTextModel(prompt, model, tier) {
             { role: 'user', content: prompt }
           ],
           temperature: 0,
-          max_tokens: 220,
-          ...(isQwenReasoningModel(model) ? { reasoning_effort: 'none' } : {}),
+          max_tokens: 400,
+          ...groqReasoningParams(model),
         }),
       });
 
@@ -1207,7 +1196,7 @@ async function tryNvidiaTextModel(prompt, model, tier) {
           ],
           temperature: 0,
           max_tokens: 420,
-          extra_body: { thinking: { type: 'disabled' } },
+          ...nvidiaReasoningParams(model),
         }),
       });
       clearTimeout(timeoutId);
@@ -1219,7 +1208,7 @@ async function tryNvidiaTextModel(prompt, model, tier) {
           lastError = `NVIDIA ${model} key #${keyIndex + 1}: limit`;
           continue;
         }
-        if (res.status === 401 || res.status === 403) {
+        if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 410) {
           blockEngine('nvidia', tier, model, keyIndex);
           lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${msg}`;
           continue;
@@ -1272,7 +1261,8 @@ async function tryOpenRouterTextModel(prompt, model, tier) {
             { role: 'user', content: prompt }
           ],
           temperature: 0,
-          max_tokens: 220,
+          max_tokens: 400,
+          ...openRouterReasoningParams(model),
         }),
       });
 
@@ -1345,6 +1335,7 @@ async function tryNvidiaVisionModel(prompt, base64, model, tier) {
           }],
           temperature: 0,
           max_tokens: 500,
+          ...nvidiaReasoningParams(model),
         }),
       });
 
@@ -1355,7 +1346,7 @@ async function tryNvidiaVisionModel(prompt, base64, model, tier) {
           lastError = `NVIDIA ${model} key #${keyIndex + 1}: limit`;
           continue;
         }
-        if (res.status === 401 || res.status === 403) {
+        if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 410) {
           blockEngine('nvidia', tier, model, keyIndex);
           lastError = `NVIDIA ${model} key #${keyIndex + 1}: ${msg}`;
           continue;
@@ -1411,6 +1402,7 @@ async function tryOpenRouterVisionModel(prompt, base64, model, tier) {
           }],
           temperature: 0,
           max_tokens: 500,
+          ...openRouterReasoningParams(model),
         }),
       });
 
@@ -1483,7 +1475,7 @@ async function tryGroqVisionModel(prompt, base64, model, tier) {
           }],
           temperature: 0,
           max_tokens: 500,
-          ...(isQwenReasoningModel(model) ? { reasoning_effort: 'none' } : {}),
+          ...groqReasoningParams(model),
         }),
       });
 
@@ -1817,4 +1809,3 @@ function parseAIResponse(text, options, questionType, rightOptions) {
 
   return { correctIndices, explanation, rawResponse: text };
 }
-
