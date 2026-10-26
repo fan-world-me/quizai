@@ -10,32 +10,40 @@ const NVIDIA_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const AUTH_CONFIG_URL = chrome.runtime.getURL('auth.json');
 
-// Model IDs checked against provider docs on 2026-10-20.
-// NVIDIA NIM retired llama-3.3-70b, qwen3-next-80b, nemotron-3-nano-30b, nemotron-super-49b v1/v1.5
-// and mistral-large-3 (HTTP 410 Gone, EOL 07-09.2026). Live: the Nemotron 3.x family.
+// Model IDs verified against provider docs on 2026-10-26.
+// NVIDIA NIM: nemotron-3.5-lightning-30b-a3b and nemotron-3-ultra-550b-a55b confirmed live in API catalog.
+//   cosmos3-nano-reasoner exists but requires a separate NGC entitlement (not a standard API key) — replaced
+//   with nemotron-3-super-120b-a12b which is available on the standard NIM endpoint.
+// OpenRouter: openai/gpt-oss-120b:free was withdrawn from the free tier (not in the Oct 5 2026 catalog of 17
+//   free models); replaced with nvidia/nemotron-3-super-120b-a12b:free which is confirmed free.
+// Groq: gpt-oss-20b, gpt-oss-120b and qwen3.8-27b are confirmed production models (paid, not free).
+// Gemini: 3.5-flash-lite and 3.8-flash are confirmed stable on ai.google.dev as of Oct 22, 2026.
+//   Gemini 3.x ignores thinkingBudget silently — use thinkingLevel only.
 const NVIDIA_TEXT_MODELS = [
   'nvidia/nemotron-3.5-lightning-30b-a3b',
   'nvidia/nemotron-3-ultra-550b-a55b',
 ];
 const NVIDIA_VISION_MODELS = [
   'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning',
-  'nvidia/cosmos3-nano-reasoner',
+  'nvidia/nemotron-3-super-120b-a12b',
 ];
 
-// OpenRouter free tier. gpt-oss is text-only, so vision uses Gemma 4 / Nemotron Omni.
-const OPENROUTER_TEXT_MODELS = ['openai/gpt-oss-120b:free', 'nvidia/nemotron-3-ultra-550b-a55b:free'];
+// OpenRouter free tier (verified Oct 5, 2026 — 17 free endpoints).
+// gpt-oss-120b:free was withdrawn; nemotron-3-super-120b-a12b:free confirmed present.
+const OPENROUTER_TEXT_MODELS = ['nvidia/nemotron-3-super-120b-a12b:free', 'nvidia/nemotron-3-ultra-550b-a55b:free'];
 const OPENROUTER_VISION_MODELS = ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'];
 
-// Gemini: 2.0 is shut down; 2.5-* is limited to users who already used it (404 for new keys);
-// gemini-3.5-flash is a deprecated alias of 3.6. Current: 3.5-flash-lite (default thinking: minimal)
-// and 3.8-flash (lowest thinking level it accepts: low).
+// Gemini: 2.0 is shut down; gemini-3.5-flash is a deprecated alias of 3.6.
+// Current stable: 3.5-flash-lite and 3.8-flash (both confirmed on ai.google.dev, last updated 2026-10-22).
+// Thinking: Gemini 3.x uses thinkingLevel only (thinkingBudget is silently ignored on Gemini 3).
+//   3.5-flash-lite accepts "minimal"; 3.8-flash minimum accepted level is "low".
 const GEMINI_TEXT_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 const GEMINI_VISION_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 const GEMINI_TIER = 'gemini-3';
 
 // Groq: llama-3.1-8b-instant and llama-3.3-70b-versatile are Enterprise-only (08.2026);
 // qwen3-32b, llama-4-*, qwen3.6-27b and groq/compound(-mini) are shut down (07-09.2026).
-// gpt-oss-* are text-only; qwen3.8-27b is the only Groq vision model.
+// gpt-oss-* are text-only; qwen3.8-27b is the only Groq model with vision support (up to 20 MB).
 const GROQ_TEXT_MODELS = [
   'openai/gpt-oss-20b',
   'openai/gpt-oss-120b',
@@ -59,8 +67,10 @@ const engineState = new Map();
 // Thinking is not needed for quiz answers, so it is switched off (or minimised) per provider docs:
 //  - Groq qwen3.8: reasoning_effort "none". gpt-oss can't be fully disabled -> "low" + include_reasoning:false.
 //  - NVIDIA Nemotron 3.x: chat_template_kwargs.enable_thinking=false (top-level field of the raw JSON body).
-//  - Gemini 3.x: thinkingConfig.thinkingLevel "minimal" (Flash-Lite / 3.6); 3.8 Flash rejects "minimal" -> "low".
-//  - OpenRouter: reasoning.enabled=false (gpt-oss: effort low, excluded from the response).
+//  - Gemini 3.x: thinkingConfig.thinkingLevel only — thinkingBudget is silently ignored on Gemini 3 models.
+//    Flash-Lite / 3.5 / 3.6 accept "minimal"; 3.8-flash minimum is "low".
+//  - OpenRouter Nemotron/Gemma: reasoning.enabled=false. Nemotron-Super: no reasoning params needed (not a
+//    reasoning model). gpt-oss if it returns to free tier: effort low, excluded from the response.
 function groqReasoningParams(model) {
   if (/^qwen\//i.test(model)) return { reasoning_effort: 'none' };
   if (/gpt-oss/i.test(model)) return { reasoning_effort: 'low', include_reasoning: false };
@@ -70,10 +80,13 @@ function nvidiaReasoningParams(model) {
   return /nemotron/i.test(model) ? { chat_template_kwargs: { enable_thinking: false } } : {};
 }
 function geminiThinkingConfig(model) {
+  // thinkingBudget is silently ignored on Gemini 3.x — use thinkingLevel only.
   return { thinkingLevel: /lite|3\.6|3\.5/i.test(model) ? 'minimal' : 'low' };
 }
 function openRouterReasoningParams(model) {
   if (/gpt-oss/i.test(model)) return { reasoning: { effort: 'low', exclude: true } };
+  // nemotron-super is not a reasoning model, skip reasoning params
+  if (/nemotron-3-super/i.test(model)) return {};
   return { reasoning: { enabled: false } };
 }
 let lastMeta = null;
@@ -259,8 +272,8 @@ function formatModelLabel(provider, model) {
     'nvidia/nemotron-3-ultra-550b-a55b': 'NVIDIA Nemotron Ultra 550B',
     'nvidia/nemotron-3.5-lightning-30b-a3b': 'NVIDIA Nemotron Lightning 30B',
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning': 'NVIDIA Nemotron Omni 30B',
-    'nvidia/cosmos3-nano-reasoner': 'NVIDIA Cosmos3 Nano',
-    'openai/gpt-oss-120b:free': 'OpenRouter GPT-OSS 120B',
+    'nvidia/nemotron-3-super-120b-a12b': 'NVIDIA Nemotron Super 120B',
+    'nvidia/nemotron-3-super-120b-a12b:free': 'OpenRouter Nemotron Super 120B',
     'nvidia/nemotron-3-ultra-550b-a55b:free': 'OpenRouter Nemotron Ultra 550B',
     'google/gemma-4-31b-it:free': 'OpenRouter Gemma 4 31B',
     'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free': 'OpenRouter Nemotron Omni 30B',
