@@ -1,0 +1,15 @@
+{
+  "nvidiaKeys": [
+    "nvapi-your_nvidia_key_here"
+  ],
+  "openrouterKeys": [
+    "sk-or-v1-your_openrouter_key_here"
+  ],
+  "geminiKeys": [
+    "AIzaSyYourFirstGeminiKey",
+    "AIzaSyYourSecondGeminiKey"
+  ],
+  "groqKeys": [
+    "gsk_your_groq_key"
+  ]
+}
