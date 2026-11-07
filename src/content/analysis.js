@@ -20,6 +20,12 @@ async function captureElementForAnalysis(el) {
 
 /* ═════════════ ANALYSIS ═════════════ */
 function runAnalysis() {
+  // liveworksheets.com: the sheet is one picture with fields, handled by its own module
+  if (isLiveWorksheetsPage()) {
+    runLiveWorksheetsAssist();
+    return;
+  }
+
   if (isAnalyzing) cancelCurrentAnalysis(false);
 
   // Cancel previous request if exists
@@ -88,8 +94,15 @@ function runAnalysis() {
       msgData.rightOptions = q.rightOptions;
     }
 
+    /* Pictures that belong to the question (every platform except Kahoot, which sends its own screenshot) */
+    const imgCtx = /kahoot/i.test(window.location.hostname) ? null : scanQuestionImages(q, questions);
+    const screenshotOnly = !!(imgCtx && !imgCtx.cands.length && imgCtx.hint);
+    const cacheExtra = imgCtx ? imgCtx.key : '';
+    // Text alone is not a safe cache key when the question depends on a picture we cannot identify
+    let cacheWrite = !screenshotOnly;
+
     /* Check cache first */
-    const cached = getCachedAnswer(q.questionText, q.options);
+    const cached = screenshotOnly ? null : getCachedAnswer(q.questionText, q.options, cacheExtra);
     if (cached) {
       setStat('📦 З кешу', 'ok');
       processAnswer(cached, q, () => next(i + 1), () => done++);
@@ -100,7 +113,7 @@ function runAnalysis() {
       if (thisRequestId !== currentRequestId) return;
       if (res && res.success && res.answer) {
         const ans = res.answer;
-        setCachedAnswer(q.questionText, q.options, ans);
+        if (cacheWrite) setCachedAnswer(q.questionText, q.options, ans, cacheExtra);
         if (res.statusLabel) setStat(res.statusLabel, 'ok');
         if (floatingPanel) {
           const eng = floatingPanel.querySelector('#__qenginestatus');
@@ -131,6 +144,24 @@ function runAnalysis() {
           sendQuizRequest();
         })
         .catch(() => sendQuizRequest());
+    } else if (imgCtx && (imgCtx.cands.length || imgCtx.hint)) {
+      loadQuestionImages(imgCtx, q)
+        .then((loaded) => {
+          if (thisRequestId !== currentRequestId) return;
+          const label = `Аналіз ${i + 1}/${questions.length}`;
+          if (loaded.images.length) {
+            msgData.images = loaded.images;
+            setStat(`${label} · 🖼 ${loaded.images.length}`, 'an');
+          } else if (loaded.screenshot) {
+            msgData.imageBase64 = loaded.screenshot;
+            setStat(`${label} · 🖼 скріншот`, 'an');
+          } else {
+            cacheWrite = false;
+            setStat(`${label} · 🖼 не знайдено`, 'an');
+          }
+          sendQuizRequest();
+        })
+        .catch(() => { cacheWrite = false; sendQuizRequest(); });
     } else {
       sendQuizRequest();
     }
