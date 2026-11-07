@@ -37,6 +37,8 @@
       "bg/prompts.js",
       "bg/fallback.js",
       "bg/kahoot.js",
+      "bg/images.js",
+      "bg/liveworksheets.js",
       "bg/handlers.js",
       "background.js"
     ],
@@ -65,9 +67,11 @@
         "content/detect/kahoot.js",
         "content/detect/classtime.js",
         "content/detect/helpers.js",
+        "content/images.js",
         "content/analysis.js",
         "content/highlight.js",
         "content/feedback.js",
+        "content/liveworksheets.js",
         "content/main.js"
       ],
       "run_at": "document_start",

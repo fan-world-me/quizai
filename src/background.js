@@ -17,6 +17,8 @@ if (typeof importScripts === 'function') {
     'bg/prompts.js',
     'bg/fallback.js',
     'bg/kahoot.js',
+    'bg/images.js',
+    'bg/liveworksheets.js',
     'bg/handlers.js'
   );
 }

@@ -47,9 +47,11 @@
         "content/detect/kahoot.js",
         "content/detect/classtime.js",
         "content/detect/helpers.js",
+        "content/images.js",
         "content/analysis.js",
         "content/highlight.js",
         "content/feedback.js",
+        "content/liveworksheets.js",
         "content/main.js"
       ],
       "run_at": "document_start",
