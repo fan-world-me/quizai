@@ -173,7 +173,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         chrome.scripting.executeScript(
-          { target: { tabId: tab.id, allFrames: true }, files: ['content.js'] },
+          { target: { tabId: tab.id, allFrames: true }, files: chrome.runtime.getManifest().content_scripts[0].js },
           () => {
             if (chrome.runtime.lastError) {
               showStatus(chrome.runtime.lastError.message || 'Помилка', 'err');

@@ -31,7 +31,26 @@
         "https://*/*"
       ],
       "js": [
-        "content.js"
+        "content/core.js",
+        "content/screenshot.js",
+        "content/lifecycle.js",
+        "content/panel-html.js",
+        "content/panel.js",
+        "content/results.js",
+        "content/capture.js",
+        "content/auto.js",
+        "content/detect/index.js",
+        "content/detect/vseosvita.js",
+        "content/detect/naurok.js",
+        "content/detect/moodle.js",
+        "content/detect/google-forms.js",
+        "content/detect/kahoot.js",
+        "content/detect/classtime.js",
+        "content/detect/helpers.js",
+        "content/analysis.js",
+        "content/highlight.js",
+        "content/feedback.js",
+        "content/main.js"
       ],
       "run_at": "document_start",
       "all_frames": true

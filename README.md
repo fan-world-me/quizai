@@ -66,8 +66,15 @@ Browser extension that adds a floating AI panel to quiz pages — detects questi
 ```
 quaz_ai/
 ├── src/
-│   ├── background.js        — AI provider calls, fallback chain, model lists
-│   ├── content.js           — floating panel, quiz detection, answer highlighting, screenshot selection
+│   ├── background.js        — loader: importScripts of bg/* (Chrome); Firefox lists them in its manifest
+│   ├── bg/                  — background modules
+│   │   ├── models.js        — AI model lists, provider order, labels, reasoning params (edit models here)
+│   │   ├── config.js, keys.js, engine-state.js, fallback.js, parsing.js, prompts.js, kahoot.js, handlers.js
+│   │   └── providers/       — groq, nvidia, gemini, openrouter, common
+│   ├── content/             — content-script modules, loaded in the order listed in the manifests
+│   │   ├── core.js, screenshot.js, lifecycle.js, panel-html.js, panel.js, results.js, capture.js, auto.js
+│   │   ├── detect/          — site detectors: vseosvita, naurok, moodle, google-forms, kahoot, classtime
+│   │   └── analysis.js, highlight.js, feedback.js, main.js
 │   ├── popup.html           — extension popup markup
 │   ├── popup.css            — popup styles (Monocraft font)
 │   ├── popup.js             — popup settings and actions
@@ -90,7 +97,7 @@ quaz_ai/
 ### 🚀 How it works
 
 ```
-[Page loads] ──► content.js detects site ──► extracts questions & answers
+[Page loads] ──► content/ detects site ──► extracts questions & answers
                         │
                         ▼
              [Send to background.js]
