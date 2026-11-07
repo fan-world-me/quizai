@@ -68,6 +68,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleTestConnection(sendResponse);
     return true;
   }
+  if (message.type === 'LWS_RUN') {
+    handleLwsRun(message, sender, sendResponse);
+    return true;
+  }
 });
 
 async function handleTestConnection(sendResponse) {
@@ -188,6 +192,24 @@ async function handleAnalyzeImage(data, sendResponse) {
 async function handleAnalyzeQuiz(data, sendResponse) {
   try {
     const qType = (data.questionType || 'radio').toLowerCase();
+    const isKahoot = !!(data && data.source && /kahoot/i.test(String(data.source)));
+
+    // Pictures attached by the content script (any platform except Kahoot, which sends its own screenshot):
+    // merge them into one JPEG and use the vision pipeline instead of text-only.
+    let imageNote = '';
+    if (!isKahoot && Array.isArray(data.images) && data.images.length && !data.imageBase64) {
+      try {
+        const built = await buildVisionImage(data.images);
+        if (built.base64) {
+          data.imageBase64 = built.base64;
+          imageNote = buildImageNote(built);
+        }
+      } catch (_) { /* no usable pictures - continue with text only */ }
+      delete data.images;
+    } else if (!isKahoot && data.imageBase64) {
+      imageNote = buildImageNote(null);
+    }
+
     if (qType === 'open_ended' || qType === 'short_answer') {
       const r = await answerOpenEndedWithProviders(data.question, data.imageBase64 || '', data.mediaContext || '');
       if (chrome.runtime.lastError) return;
@@ -235,6 +257,39 @@ async function handleAnalyzeQuiz(data, sendResponse) {
 
     // Fallback: original generic pipeline
     const prompt = buildPrompt(data.question, data.options, data.questionType || 'radio', data.rightOptions);
+
+    // Question has a picture: vision models first (same prompt, same answer format).
+    if (data.imageBase64 && !isKahoot) {
+      const visionPrompt = `${imageNote}\n\n${prompt}`;
+      let vResult = await analyzeImageWithFallback(data.imageBase64, visionPrompt);
+      let vParsed = parseAIResponse(vResult.text, data.options, data.questionType || 'radio', data.rightOptions);
+
+      if (!hasParsedAnswer(vParsed, data.questionType || 'radio')) {
+        try {
+          const retryPrompt = `${visionPrompt}
+
+The previous response ignored the format. Reply now with the final answer only.
+Your first characters must be "ANSWER:" (or "ORDER:"/"MATCHING:" for that task type).`;
+          const vRetry = await analyzeImageWithFallback(data.imageBase64, retryPrompt);
+          const retryParsed = parseAIResponse(vRetry.text, data.options, data.questionType || 'radio', data.rightOptions);
+          if (hasParsedAnswer(retryParsed, data.questionType || 'radio')) {
+            vResult = vRetry;
+            vParsed = retryParsed;
+          }
+        } catch (_) { /* keep the first response */ }
+      }
+
+      if (chrome.runtime.lastError) return;
+      sendResponse({
+        success: true,
+        answer: vParsed,
+        model: `${vResult.meta.provider}/${vResult.meta.model}`,
+        meta: vResult.meta,
+        statusLabel: getStatusLabel(vResult.meta),
+        usage: vResult.meta?.usage || null,
+      });
+      return;
+    }
     let result = await analyzeTextWithFallback(prompt, data);
     let parsed = parseAIResponse(result.text, data.options, data.questionType || 'radio', data.rightOptions);
 
