@@ -5,7 +5,7 @@
 function buildQuestionsSignature(questions) {
   return questions.map((q) => {
     const options = (q.options || []).join('|');
-    return `${q.type || 'radio'}::${q.questionText || ''}::${options}::${q.mediaContext || ''}`;
+    return `${q.type || 'radio'}::${q.questionText || ''}::${options}::${q.mediaContext || ''}::${quickImageSignature(q)}`;
   }).join('##');
 }
 
