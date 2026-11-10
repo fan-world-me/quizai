@@ -1,4 +1,4 @@
-[![Telegram](https://img.shields.io/badge/Telegram-@fan__world__me-2CA5E0?style=flat-square&logo=telegram)](https://t.me/fan_world_me)   [![Discord](https://img.shields.io/badge/Discord-fan__world__me-5865F2?style=flat-square&logo=discord)](https://discord.com/users/1040301536036786248)   [![GitHub](https://img.shields.io/badge/GitHub-fan--world--me-181717?style=flat-square&logo=github)](https://github.com/fan-world-me)   [![Portfolio](https://img.shields.io/badge/Portfolio-fan--world--me.github.io-00e5ff?style=flat-square&logo=githubpages&logoColor=white)](https://fan-world-me.github.io/)
+[![Telegram](https://img.shields.io/badge/Telegram-@fan__world__me-2CA5E0?style=flat-square&logo=telegram)](https://t.me/fan_world_me) [![Discord](https://img.shields.io/badge/Discord-fan__world__me-5865F2?style=flat-square&logo=discord)](https://discord.com/users/1040301536036786248) [![GitHub](https://img.shields.io/badge/GitHub-fan--world--me-181717?style=flat-square&logo=github)](https://github.com/fan-world-me) [![Portfolio](https://img.shields.io/badge/Portfolio-fan--world--me.github.io-00e5ff?style=flat-square&logo=githubpages&logoColor=white)](https://fan-world-me.github.io/)
 
 ```
  ██████╗ ██╗   ██╗██╗███████╗     █████╗ ██╗
@@ -42,53 +42,36 @@ Browser extension that adds a floating AI panel to quiz pages — detects questi
 
 ### 🧰 Tech Stack
 
-**Core**
-![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E?style=flat-square&logo=javascript&logoColor=black)
-![Chrome Extensions](https://img.shields.io/badge/Chrome_Extensions-MV3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)
-![Firefox](https://img.shields.io/badge/Firefox_Add--ons-MV3-FF7139?style=flat-square&logo=firefox&logoColor=white)
+**Core** [![JavaScript](https://img.shields.io/badge/JavaScript-ES2022-F7DF1E?style=flat-square&logo=javascript&logoColor=black)](#) [![Chrome Extensions](https://img.shields.io/badge/Chrome_Extensions-MV3-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](#) [![Firefox](https://img.shields.io/badge/Firefox_Add--ons-MV3-FF7139?style=flat-square&logo=firefox&logoColor=white)](#)
 
-**AI Providers**
-![Groq](https://img.shields.io/badge/Groq-primary-F55036?style=flat-square)
-![NVIDIA](https://img.shields.io/badge/NVIDIA-fallback-76B900?style=flat-square&logo=nvidia&logoColor=white)
-![Gemini](https://img.shields.io/badge/Gemini-fallback-4285F4?style=flat-square&logo=google&logoColor=white)
-![OpenRouter](https://img.shields.io/badge/OpenRouter-fallback-6B21A8?style=flat-square)
+**AI Providers** [![Groq](https://img.shields.io/badge/Groq-primary-F55036?style=flat-square)](#) [![NVIDIA](https://img.shields.io/badge/NVIDIA-fallback-76B900?style=flat-square&logo=nvidia&logoColor=white)](#) [![Gemini](https://img.shields.io/badge/Gemini-fallback-4285F4?style=flat-square&logo=google&logoColor=white)](#) [![OpenRouter](https://img.shields.io/badge/OpenRouter-fallback-6B21A8?style=flat-square)](#)
 
-**APIs used**
-![Storage API](https://img.shields.io/badge/Storage_API-settings-00e5ff?style=flat-square)
-![Tabs API](https://img.shields.io/badge/Tabs_API-messaging-00e5ff?style=flat-square)
-![Scripting API](https://img.shields.io/badge/Scripting_API-injection-00e5ff?style=flat-square)
-![Clipboard API](https://img.shields.io/badge/Clipboard_API-read-00e5ff?style=flat-square)
+**APIs used** [![Storage API](https://img.shields.io/badge/Storage_API-settings-00e5ff?style=flat-square)](#) [![Tabs API](https://img.shields.io/badge/Tabs_API-messaging-00e5ff?style=flat-square)](#) [![Scripting API](https://img.shields.io/badge/Scripting_API-injection-00e5ff?style=flat-square)](#) [![Clipboard API](https://img.shields.io/badge/Clipboard_API-read-00e5ff?style=flat-square)](#)
 
 ---
 
 ### 🗂️ Project Structure
 
 ```
-quaz_ai/
+quizai/
 ├── src/
-│   ├── background.js        — loader: importScripts of bg/* (Chrome); Firefox lists them in its manifest
-│   ├── bg/                  — background modules
-│   │   ├── models.js        — AI model lists, provider order, labels, reasoning params (edit models here)
-│   │   ├── config.js, keys.js, engine-state.js, fallback.js, parsing.js, prompts.js, kahoot.js, handlers.js
-│   │   └── providers/       — groq, nvidia, gemini, openrouter, common
-│   ├── content/             — content-script modules, loaded in the order listed in the manifests
-│   │   ├── core.js, screenshot.js, lifecycle.js, panel-html.js, panel.js, results.js, capture.js, auto.js
-│   │   ├── detect/          — site detectors: vseosvita, naurok, moodle, google-forms, kahoot, classtime
-│   │   └── analysis.js, highlight.js, feedback.js, main.js
-│   ├── popup.html           — extension popup markup
-│   ├── popup.css            — popup styles (Monocraft font)
-│   ├── popup.js             — popup settings and actions
-│   ├── howto.html           — built-in help page
-│   ├── howto.css            — help page styles
-│   ├── auth.example.json    — example API-key config (copy → auth.json)
-│   ├── auth.json            — your API keys — local only, git-ignored
-│   ├── Monocraft.ttf        — bundled UI font
-│   └── icons/               — 16 / 48 / 128 px PNG icons
+│   ├── background.js          — AI provider calls, fallback chain, model lists
+│   ├── content.js             — floating panel, quiz detection, answer highlighting, screenshot selection
+│   ├── popup.html             — extension popup markup
+│   ├── popup.css              — popup styles (Monocraft font)
+│   ├── popup.js               — popup settings and actions
+│   ├── howto.html             — built-in help page
+│   ├── howto.css              — help page styles
+│   ├── auth.example.json      — example API-key config (copy → auth.json)
+│   ├── auth.json              — your API keys — local only, git-ignored
+│   ├── Monocraft.ttf          — bundled UI font
+│   └── icons/                 — 16 / 48 / 128 px PNG icons
 ├── manifests/
-│   ├── chrome/manifest.json — Chrome MV3 manifest
-│   └── firefox/manifest.json— Firefox MV3 manifest
-├── dist/                    — generated build output (gitignored)
-├── package-extensions.ps1   — build & package script
+│   ├── chrome/manifest.json   — Chrome MV3 manifest
+│   └── firefox/manifest.json  — Firefox MV3 manifest
+├── dist/                      — generated build output (gitignored)
+├── package-extensions.ps1     — build & package script (Windows / PowerShell)
+├── package-extensions.sh      — build & package script (Linux / macOS / WSL)
 └── LICENSE
 ```
 
@@ -97,7 +80,7 @@ quaz_ai/
 ### 🚀 How it works
 
 ```
-[Page loads] ──► content/ detects site ──► extracts questions & answers
+[Page loads] ──► content.js detects site ──► extracts questions & answers
                         │
                         ▼
              [Send to background.js]
@@ -136,10 +119,10 @@ Empty arrays `[]` are fine for providers you don't use.
 
 | Provider | Key page |
 |---|---|
-| Groq | https://console.groq.com/keys |
-| NVIDIA | https://build.nvidia.com |
-| Gemini | https://aistudio.google.com/app/apikey |
-| OpenRouter | https://openrouter.ai/keys |
+| Groq | [https://console.groq.com/keys](https://console.groq.com/keys) |
+| NVIDIA | [https://build.nvidia.com](https://build.nvidia.com) |
+| Gemini | [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
+| OpenRouter | [https://openrouter.ai/keys](https://openrouter.ai/keys) |
 
 > `src/auth.json` is gitignored and must never be committed.
 
@@ -147,9 +130,22 @@ Empty arrays `[]` are fine for providers you don't use.
 
 ### 📦 Build
 
+Both scripts do the same thing: copy `src/` into `dist/<browser>-unpacked/`, drop in the right manifest from `manifests/`, and pack zip archives without `auth.json`.
+
+**Windows (PowerShell)**
+
 ```powershell
 .\package-extensions.ps1
 ```
+
+**Linux / macOS / WSL**
+
+```bash
+chmod +x package-extensions.sh   # once
+./package-extensions.sh
+```
+
+> Needs `bash` and either `zip` (`sudo apt install zip` / `sudo pacman -S zip`) or `python3` as a fallback for packing.
 
 Output in `dist/`:
 
@@ -166,6 +162,7 @@ dist/
 ### 🛠️ Install Locally
 
 **Chrome / Edge / Brave**
+
 ```
 1. Open chrome://extensions
 2. Enable "Developer mode" (top right)
@@ -174,6 +171,7 @@ dist/
 ```
 
 **Firefox**
+
 ```
 1. Open about:debugging#/runtime/this-firefox
 2. Click "Load Temporary Add-on"
@@ -200,4 +198,4 @@ After rebuilding, reload the extension and refresh the quiz tab.
 
 Made with 🩵 in Ukraine 🇺🇦
 
-[![Telegram](https://img.shields.io/badge/Telegram-@fan__world__me-2CA5E0?style=flat-square&logo=telegram)](https://t.me/fan_world_me)   [![Discord](https://img.shields.io/badge/Discord-fan__world__me-5865F2?style=flat-square&logo=discord)](https://discord.com/users/1040301536036786248)   [![Portfolio](https://img.shields.io/badge/Portfolio-fan--world--me.github.io-00e5ff?style=flat-square&logo=githubpages&logoColor=white)](https://fan-world-me.github.io/)
+[![Telegram](https://img.shields.io/badge/Telegram-@fan__world__me-2CA5E0?style=flat-square&logo=telegram)](https://t.me/fan_world_me) [![Discord](https://img.shields.io/badge/Discord-fan__world__me-5865F2?style=flat-square&logo=discord)](https://discord.com/users/1040301536036786248) [![Portfolio](https://img.shields.io/badge/Portfolio-fan--world--me.github.io-00e5ff?style=flat-square&logo=githubpages&logoColor=white)](https://fan-world-me.github.io/)
