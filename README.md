@@ -130,7 +130,7 @@ Empty arrays `[]` are fine for providers you don't use.
 
 ### 📦 Build
 
-Both scripts do the same thing: copy `src/` into `dist/<browser>-unpacked/`, drop in the right manifest from `manifests/`, and pack zip archives without `auth.json`.
+Both scripts do the same thing: copy `src/` into `dist/<browser>-unpacked/`, drop in the right manifest from `manifests/`, pack zip archives (with forward-slash paths, so browsers read the folders correctly) and make an unsigned `.xpi` copy of the Firefox zip.
 
 **Windows (PowerShell)**
 
@@ -151,11 +151,14 @@ Output in `dist/`:
 
 ```
 dist/
-├── chrome-unpacked/      — load in Chrome/Edge/Brave developer mode
-├── firefox-unpacked/     — load in Firefox temporary add-on mode
-├── quiz-ai-chrome.zip    — Chrome package (without auth.json)
-└── quiz-ai-firefox.zip   — Firefox package (without auth.json)
+├── chrome-unpacked/        — load in Chrome/Edge/Brave developer mode
+├── firefox-unpacked/       — load in Firefox temporary add-on mode
+├── quiz-ai-chrome.zip      — Chrome package (includes auth.json if present)
+├── quiz-ai-firefox.zip     — Firefox package (includes auth.json if present)
+└── quiz-ai-firefox.xpi     — copy of the Firefox zip, UNSIGNED (signing is a stub)
 ```
+
+> Firefox signing is a stub for now: the `.xpi` is just a renamed copy of the zip. To sign it for real, replace the stub with `web-ext sign` (AMO API key + secret) in the script.
 
 ---
 
@@ -184,9 +187,9 @@ After rebuilding, reload the extension and refresh the quiz tab.
 
 ### 🔒 Security note
 
-> API keys are stored in `src/auth.json` — local file, never uploaded.  
-> Zip packages are built without `auth.json`.  
-> The unpacked `dist/*-unpacked` folders may include your local `auth.json` for testing only.
+> API keys live in `src/auth.json` — a local file, git-ignored, never uploaded by the scripts.  
+> Both the unpacked folders **and the zip/xpi packages include your `auth.json`** so the extension works out of the box.  
+> Don't share anything from `dist/` — it contains your keys.
 
 ---
 
