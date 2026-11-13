@@ -1,12 +1,13 @@
 // Quiz AI Analyzer - background module: models.js
 // Author: fan_world_me
-// Model IDs verified against provider docs on 2026-10-26.
+// Model IDs verified against provider docs on 2026-11-13.
 // NVIDIA NIM: nemotron-3.5-lightning-30b-a3b and nemotron-3-ultra-550b-a55b confirmed live in API catalog.
 //   nemotron-3-super-120b-a12b was deprecated on 2026-10-19 — replaced with nemotron-3.5-super-vl-120b-a12b,
 //   a vision-language model released 2026-10-15 and confirmed available on integrate.api.nvidia.com.
 // OpenRouter: openai/gpt-oss-120b:free was withdrawn from the free tier (not in the Oct 5 2026 catalog of 17
 //   free models); replaced with nvidia/nemotron-3-super-120b-a12b:free which is confirmed free.
-// Groq: gpt-oss-20b, gpt-oss-120b and qwen3.8-27b are confirmed production models (paid, not free).
+// Groq: gpt-oss-20b and gpt-oss-120b are production models, qwen3.8-27b is Preview; all three have Free-plan limits
+//   (30 RPM, 1K RPD, 8K TPM, 200K TPD) plus paid Developer tier.
 // Gemini: 3.5-flash-lite and 3.8-flash are confirmed stable on ai.google.dev as of Oct 22, 2026.
 //   Gemini 3.x ignores thinkingBudget silently — use thinkingLevel only.
 const NVIDIA_TEXT_MODELS = [
