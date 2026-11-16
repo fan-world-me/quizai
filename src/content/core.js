@@ -2,30 +2,35 @@
 // State, constants, small utils, provider keys, runtime messaging
 'use strict';
 
-// Content scripts are loaded as separate files that share one scope (see manifests),
-// so there is no IIFE wrapper. The top-frame / run-once guard lives in main.js.
+// Guard against re-execution on SPA navigation or duplicate injection.
+// All top-level let/const declarations below will throw "already declared"
+// if the scripts run twice in the same context — this flag prevents that.
+if (typeof window.__qazCoreLoaded !== 'undefined') {
+  throw new Error('__qaz already loaded');
+}
+window.__qazCoreLoaded = true;
 
 
-let isAnalyzing     = false;
-let progressOverlay = null;
-let floatingPanel   = null;
-let isPanelOpen     = false;
-let lastResults     = [];
-let autoEnabled     = false;   /* tracked separately to guard MutationObserver */
-let captureMode     = false;   /* area-selection state */
-let fabHidden       = false;   /* FAB visibility state */
-let autoTimer       = null;
-let currentRequestId = 0;      /* request queue management */
-let abortController = null;    /* abort old requests */
-let kahootOverlayFrame = 0;
-const kahootOverlayTrackers = [];
+var isAnalyzing     = false;
+var progressOverlay = null;
+var floatingPanel   = null;
+var isPanelOpen     = false;
+var lastResults     = [];
+var autoEnabled     = false;   /* tracked separately to guard MutationObserver */
+var captureMode     = false;   /* area-selection state */
+var fabHidden       = false;   /* FAB visibility state */
+var autoTimer       = null;
+var currentRequestId = 0;      /* request queue management */
+var abortController = null;    /* abort old requests */
+var kahootOverlayFrame = 0;
+var kahootOverlayTrackers = [];
 
-const C_OK  = '#00C851';
-const C_ORG = '#FF8800';
-const C_ERR = '#FF4444';
-const Z     = '2147483647';
-let lastAutoSignature = '';
-const AUTO_SCAN_INTERVAL_MS = 10000;
+var C_OK  = '#00C851';
+var C_ORG = '#FF8800';
+var C_ERR = '#FF4444';
+var Z     = '2147483647';
+var lastAutoSignature = '';
+var AUTO_SCAN_INTERVAL_MS = 10000;
 
 /* Debounce utility */
 function debounce(func, wait) {

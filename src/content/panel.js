@@ -301,7 +301,7 @@ function bindPanel() {
 }
 
 /* ─── FAB show/hide ─── */
-const isMobile = () => /Mobi|Android/i.test(navigator.userAgent);
+var isMobile = () => /Mobi|Android/i.test(navigator.userAgent);
 
 function hideFab() {
   fabHidden = true;

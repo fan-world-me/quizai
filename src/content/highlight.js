@@ -18,6 +18,11 @@ function applyHighlight(q, answer) {
 }
 
 function applyOrderHighlight(q, orderIndices) {
+  // naurok beta: reorder items via ↑ buttons and show numbered badges
+  if (q._tbOrderList) {
+    applyNaurokBetaOrder(q, orderIndices);
+  }
+
   const isKahoot = /kahoot/i.test(String(q.source || location.hostname));
   if (isKahoot) {
     orderIndices.forEach((itemIdx, rank) => {
@@ -72,6 +77,16 @@ function inferOrderFromAnswerWord(options, answerWord) {
 
 /* Matching: pairs = [{left:'Foo', right:'Bar'}, ...] */
 function applyMatchHighlight(q, matchPairs) {
+  // naurok beta categorize: assign chips to groups
+  if (q._tbCatPool) {
+    applyNaurokBetaCategorize(q, matchPairs);
+  }
+
+  // naurok beta matching: click card pairs
+  if (q._tbMatchBox) {
+    applyNaurokBetaMatch(q, matchPairs);
+  }
+
   if (q.leftEls && q.rightEls) {
     matchPairs.forEach(pair => {
       const leftIdx = findBestTextIndex(pair.left, q.options);
@@ -116,8 +131,57 @@ function applyMatchHighlight(q, matchPairs) {
   });
 }
 
-function applyOpenAnswerHighlight(q, answerText) {
-  const input = q.inputEl || q.optionEls?.[0];
+/* Fill-in-the-blank: answers is array of strings, one per input/select slot.
+ * Handles both input.tb-fill-input (free text) and select.tb-fill-select (dropdown). */
+function applyFillBlankHighlight(q, answers) {
+  const inputs  = q._tbFillInputs  || [];
+  const selects = q._tbFillSelects || [];
+
+  let parts = Array.isArray(answers) ? answers : [];
+  if (!parts.length && typeof answers === 'string') {
+    parts = answers.split(/[\/|,;]+/).map(s => s.trim()).filter(Boolean);
+  }
+  if (!parts.length) parts = [String(answers || '')];
+
+  // Handle free-text inputs
+  inputs.forEach((input, i) => {
+    if (!input || isOwnPanel(input)) return;
+    const val = (parts[i] || parts[0] || '').trim();
+    if (!val) return;
+    input.value = val;
+    input.dispatchEvent(new Event('input',  { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.style.setProperty('outline',       `3px solid ${C_OK}`, 'important');
+    input.style.setProperty('outline-offset', '2px',              'important');
+    input.style.setProperty('box-shadow',    `0 0 0 3px ${C_OK}`, 'important');
+    input.setAttribute('data-qaz-hl', '1');
+  });
+
+  // Handle select dropdowns — match answer text to option text, then set value
+  selects.forEach((sel, i) => {
+    if (!sel || isOwnPanel(sel)) return;
+    const target = (parts[i] || parts[0] || '').trim().toLowerCase();
+    if (!target) return;
+    let matched = false;
+    for (const opt of Array.from(sel.options)) {
+      if (opt.value === '') continue;
+      if (opt.text.trim().toLowerCase() === target ||
+          opt.text.trim().toLowerCase().includes(target) ||
+          target.includes(opt.text.trim().toLowerCase())) {
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        matched = true;
+        break;
+      }
+    }
+    sel.style.setProperty('outline',       `3px solid ${matched ? C_OK : '#FF8800'}`, 'important');
+    sel.style.setProperty('outline-offset', '2px',                                    'important');
+    sel.style.setProperty('box-shadow',    `0 0 0 3px ${matched ? C_OK : '#FF8800'}`, 'important');
+    sel.setAttribute('data-qaz-hl', '1');
+  });
+}
+
+function applyOpenAnswerHighlight(q, answerText) {  const input = q.inputEl || q.optionEls?.[0];
   if (!input || isOwnPanel(input)) return;
   if ('value' in input && answerText) {
     input.value = answerText;

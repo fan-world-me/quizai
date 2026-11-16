@@ -27,3 +27,6 @@ src/*.otf
 src/*.woff
 src/*.woff2
 !src/Monocraft.ttf
+
+# ADB deploy skill (local notes)
+skill.md

@@ -16,7 +16,7 @@ function isOwnPanel(el) {
  * Supported:
  *  1. vseosvita.ua  — radio/checkbox blocks, sort blocks
  *  2. zno.osvita.ua — .question + .answer divs, q-radio
- *  3. naurok.ua     — .question-option-inner colored blocks
+ *  3. naurok.ua     — beta (tb-*) and legacy (.question-option-inner) layouts
  *  4. Moodle        — multichoice, truefalse, match (dropdowns)
  *  5. Google Forms  — .Qr7Oae + radiogroup / list
  *  6. Kahoot.it     — answer-text blocks
@@ -46,8 +46,11 @@ function findQuestions() {
       if (!qText) return;
       const cbs = container.querySelectorAll('input[type="checkbox"]');
       const options = blocks.map(b => (b.querySelector('label') || b).textContent.trim()).filter(Boolean);
+      // Use the wider question block as containerEl so imgSearchRoots can reach
+      // images inside .v-test-questions-title that sit above .flex-row-test.
+      const questionBlock = container.closest('.v-test-questions-block,.v-test-go-bg,.v-test-question') || container;
       if (options.length >= 2)
-        qs.push({ questionText: qText, options, optionEls: blocks, containerEl: container, type: cbs.length > 0 ? 'checkbox' : 'radio' });
+        qs.push({ questionText: qText, options, optionEls: blocks, containerEl: questionBlock, type: cbs.length > 0 ? 'checkbox' : 'radio' });
     });
     if (qs.length) return qs;
   }

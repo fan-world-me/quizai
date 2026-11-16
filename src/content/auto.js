@@ -10,7 +10,7 @@ function stopAutoLoop() {
   }
 }
 
-const debouncedAutoRun = debounce(function() {
+var debouncedAutoRun = debounce(function() {
   if (isAnalyzing || !autoEnabled) return;
   if (isLiveWorksheetsPage()) return;   // worksheets there are handled manually from the panel
   const questions = findQuestions();

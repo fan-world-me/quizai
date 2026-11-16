@@ -110,6 +110,7 @@ function hasParsedAnswer(parsed, questionType) {
   if (questionType === 'matching') return Array.isArray(parsed.matchPairs) && parsed.matchPairs.length > 0;
   if (questionType === 'ordering') return Array.isArray(parsed.orderIndices) && parsed.orderIndices.length > 1;
   if (questionType === 'open_ended' || questionType === 'short_answer') return !!(parsed.answer || parsed.textAnswer);
+  if (questionType === 'fill_blank') return Array.isArray(parsed.fillAnswers) && parsed.fillAnswers.length > 0;
   return Array.isArray(parsed.correctIndices) && parsed.correctIndices.length > 0;
 }
 
@@ -158,8 +159,32 @@ function parseAIResponse(text, options, questionType, rightOptions) {
   }
 
   if (questionType === 'open_ended' || questionType === 'short_answer') {
-    const answer = (parts.answerText || text || '').trim().replace(/^['"]|['"]$/g, '').slice(0, 120);
+    const raw = (parts.answerText || text || '').trim();
+    // Strip any leftover ANSWER:/FILL:/ORDER: prefix the model may have included
+    const answer = raw
+      .replace(/^(ANSWER|FILL|ORDER|MATCHING)\s*:\s*/i, '')
+      .replace(/^['"]|['"]$/g, '')
+      .trim()
+      .slice(0, 120);
     return { answer, textAnswer: answer, explanation, rawResponse: text };
+  }
+
+  if (questionType === 'fill_blank') {
+    // Parse FILL:\nBLANK1: word\nBLANK2: word...
+    const fillAnswers = [];
+    const fillSection = text.match(/FILL\s*:\s*([\s\S]+?)(?:EXPLANATION|$)/i);
+    if (fillSection) {
+      const lines = fillSection[1].split('\n');
+      for (const line of lines) {
+        const m = line.match(/BLANK\s*\d+\s*:\s*(.+)/i);
+        if (m) fillAnswers.push(m[1].replace(/^['"]|['"]$/g, '').trim());
+      }
+    }
+    // Fallback: single ANSWER: line
+    if (!fillAnswers.length && parts.answerText) {
+      parts.answerText.split(/[\/|,;]+/).map(s => s.trim()).filter(Boolean).forEach(s => fillAnswers.push(s));
+    }
+    return { fillAnswers, answer: fillAnswers[0] || '', explanation, rawResponse: text };
   }
 
   let correctIndices = [];

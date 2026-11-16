@@ -4,7 +4,7 @@
 // locally through its jQuery plugin; this module runs that command from the panel.
 'use strict';
 
-const LWS_HOST_RE = /(^|\.)liveworksheets\.com$/i;
+var LWS_HOST_RE = /(^|\.)liveworksheets\.com$/i;
 
 function isLiveWorksheetsPage() {
   return LWS_HOST_RE.test(location.hostname);

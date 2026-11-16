@@ -190,12 +190,26 @@ function processAnswer(ans, q, callback, onDone) {
     });
     if (onDone) onDone();
   } else if ((q.type === 'open_ended' || q.type === 'short_answer') && (ans.answer || ans.textAnswer || ans.rawResponse)) {
-    const textAnswer = String(ans.answer || ans.textAnswer || ans.rawResponse || '').trim();
+    const textAnswer = String(ans.answer || ans.textAnswer || ans.rawResponse || '')
+      .replace(/^(ANSWER|FILL|ORDER|MATCHING)\s*:\s*/i, '')
+      .replace(/^['"]|['"]$/g, '')
+      .trim()
+      .slice(0, 120);
     applyOpenAnswerHighlight(q, textAnswer);
     lastResults.push({
       success: true, type: 'open_ended',
       question: q.questionText,
       answers: [textAnswer],
+    });
+    if (onDone) onDone();
+  } else if (q.type === 'fill_blank' && (ans.answer || ans.textAnswer || ans.fillAnswers || ans.rawResponse)) {
+    const raw = ans.fillAnswers || ans.answer || ans.textAnswer || ans.rawResponse || '';
+    const parts = Array.isArray(raw) ? raw : [String(raw).trim()];
+    applyFillBlankHighlight(q, parts);
+    lastResults.push({
+      success: true, type: 'fill_blank',
+      question: q.questionText,
+      answers: parts,
     });
     if (onDone) onDone();
   } else if (ans.correctIndices && ans.correctIndices.length) {

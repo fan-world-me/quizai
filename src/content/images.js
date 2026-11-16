@@ -4,11 +4,11 @@
 'use strict';
 
 // Words that suggest "look at the picture" (used only when no picture was found in the DOM).
-const IMAGE_HINT_RE = /(зображен|малюн|картинк|на фото|фотограф|світлин|ілюстрац|діаграм|графік|на карті|рисун|изображ|image|picture|photo|diagram|figure|chart|graph|\bmap\b)/i;
-const IMAGE_MAX_PER_QUESTION = 8;
-const IMAGE_MIN_SIZE = 48;            // rendered px; smaller ones are icons, avatars, bullets
-const IMAGE_LOAD_TIMEOUT_MS = 8000;
-const IMAGE_ANCESTOR_LEVELS = 2;      // how far above the options block we look for the question picture
+var IMAGE_HINT_RE = /(зображен|малюн|картинк|на фото|фотограф|світлин|ілюстрац|діаграм|графік|на карті|рисун|изображ|image|picture|photo|diagram|figure|chart|graph|\bmap\b)/i;
+var IMAGE_MAX_PER_QUESTION = 8;
+var IMAGE_MIN_SIZE = 48;            // rendered px; smaller ones are icons, avatars, bullets
+var IMAGE_LOAD_TIMEOUT_MS = 8000;
+var IMAGE_ANCESTOR_LEVELS = 2;      // how far above the options block we look for the question picture
 
 function imgWithTimeout(promise, ms) {
   return Promise.race([

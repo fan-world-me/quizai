@@ -48,8 +48,29 @@ MATCHING:
 EXPLANATION: <one short reason in the question language>`;
   }
 
-  if (questionType === 'open_ended' || questionType === 'short_answer') {
-    return `Task type: short answer / fill in the blank
+  if (questionType === 'fill_blank') {
+    // Count blanks by looking for ___N___ tokens in the question text
+    const blankCount = (question.match(/___\d+___/g) || []).length || 1;
+    const slotOpts = Array.isArray(safeOptions) && safeOptions.length ? safeOptions : null;
+    const choicesNote = slotOpts
+      ? `\nAvailable choices: ${slotOpts.map((o, i) => `${i + 1}. ${o}`).join(', ')}`
+      : '';
+    const blankList = Array.from({ length: blankCount }, (_, i) => `BLANK${i + 1}: <word>`).join('\n');
+    return `Task type: fill in the blank
+
+Sentence (gaps marked as ___1___, ___2___…):
+${question}${choicesNote}
+
+Fill every gap with the most appropriate word or short phrase.${slotOpts ? ' Choose only from the available choices listed above.' : ''}
+The first characters of your response must be "FILL:".
+
+Return EXACTLY this format:
+FILL:
+${blankList}
+EXPLANATION: <one short reason in the question language>`;
+  }
+
+  if (questionType === 'open_ended' || questionType === 'short_answer') {    return `Task type: short answer / fill in the blank
 
 Question:
 ${question}
