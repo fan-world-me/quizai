@@ -1,6 +1,8 @@
 // Quiz AI Analyzer - Popup Script
 // Author: fan_world_me
 document.addEventListener('DOMContentLoaded', () => {
+  // Guard: popup.html opened directly as a file, not as an extension popup
+  if (typeof chrome === 'undefined' || !chrome.runtime) return;
   const DEFAULT_PROVIDERS = ['groq', 'nvidia', 'gemini', 'openrouter'];
   const enabledToggle = document.getElementById('enabledToggle');
   const analyzeBtn = document.getElementById('analyzeBtn');
@@ -224,4 +226,30 @@ document.addEventListener('DOMContentLoaded', () => {
       loadSettings();
     });
   });
+
+  /* ── Related extensions check ── */
+  const EXT_VSG    = 'hmenegnhakdjkeaklnndapfbphecimai';
+  const EXT_MOODLE = 'kmbjnmkpgpfmdeiaadmgjffjdclpifoh';
+
+  function checkRelatedExtensions() {
+    const fgBanner  = document.getElementById('focusGuardBanner');
+    const projVsg   = document.getElementById('proj-vsg');
+    const projMoodle = document.getElementById('proj-moodle');
+
+    if (!chrome.management) return;
+
+    chrome.management.getAll((exts) => {
+      if (chrome.runtime.lastError) return;
+      const ids = new Set(exts.filter(e => e.enabled).map(e => e.id));
+
+      // Focus Guard banner — показываем только если НЕ установлен
+      if (fgBanner) fgBanner.style.display = ids.has(EXT_VSG) ? 'none' : 'flex';
+
+      // Карточки в секции "Інші проєкти" — прячем если установлены
+      if (projVsg)    projVsg.style.display    = ids.has(EXT_VSG)    ? 'none' : '';
+      if (projMoodle) projMoodle.style.display = ids.has(EXT_MOODLE) ? 'none' : '';
+    });
+  }
+
+  checkRelatedExtensions();
 });

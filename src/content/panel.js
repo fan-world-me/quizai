@@ -37,6 +37,26 @@ function bindPanel() {
   safeSendRuntimeMessage({ type: 'GET_SETTINGS' }, (s) => applyRuntimeMeta(s || {}));
   renderHistory();
 
+  /* ── Related extensions check ── */
+  (function checkRelatedExtensions() {
+    const EXT_VSG    = 'hmenegnhakdjkeaklnndapfbphecimai';
+    const EXT_MOODLE = 'kmbjnmkpgpfmdeiaadmgjffjdclpifoh';
+    safeSendRuntimeMessage({ type: 'GET_INSTALLED_EXTENSIONS' }, (installedIds) => {
+      if (!Array.isArray(installedIds)) return;
+      const ids = new Set(installedIds);
+      const fgBanner       = floatingPanel.querySelector('#__qfgbanner');
+      const projVsg        = floatingPanel.querySelector('#__qproj_vsg');
+      const projMoodle     = floatingPanel.querySelector('#__qproj_moodle');
+      const projSection    = floatingPanel.querySelector('#__qprojects_section');
+      const vsgInstalled   = ids.has(EXT_VSG);
+      const moodleInstalled= ids.has(EXT_MOODLE);
+      if (fgBanner)   fgBanner.style.display   = vsgInstalled    ? 'none' : 'flex';
+      if (projVsg)    projVsg.style.display     = vsgInstalled    ? 'none' : 'flex';
+      if (projMoodle) projMoodle.style.display  = moodleInstalled ? 'none' : 'flex';
+      if (projSection) projSection.style.display = (vsgInstalled && moodleInstalled) ? 'none' : '';
+    });
+  })();
+
   const stopOwnContextMenu = (e) => {
     const target = e.target;
     if (!target || !floatingPanel || !floatingPanel.contains(target)) return;

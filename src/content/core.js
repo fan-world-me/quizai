@@ -6,7 +6,8 @@
 // All top-level let/const declarations below will throw "already declared"
 // if the scripts run twice in the same context — this flag prevents that.
 if (typeof window.__qazCoreLoaded !== 'undefined') {
-  throw new Error('__qaz already loaded');
+  // Duplicate injection — main.js guard will also skip. Exit silently.
+  throw new Error('__qaz already loaded'); // kept to abort remaining scripts in this injection batch
 }
 window.__qazCoreLoaded = true;
 

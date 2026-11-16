@@ -199,6 +199,15 @@ After rebuilding, reload the extension and refresh the quiz tab.
 
 ---
 
+### 🔗 Other extensions by the author
+
+| Extension | Description |
+|---|---|
+| [🛡️ Vseosvita Focus Guard](https://github.com/fan-world-me/vseosvita-focus-guard) | Neutralizes focus tracking and tab-visibility detection on vseosvita.ua |
+| [⚡ Moodle Auto Relogin](https://github.com/fan-world-me/moodle-autoreconnect) | Keeps your Moodle session alive and silently re-logs you in if it expires |
+
+---
+
 Made with 🩵 in Ukraine 🇺🇦
 
 [![Telegram](https://img.shields.io/badge/Telegram-@fan__world__me-2CA5E0?style=flat-square&logo=telegram)](https://t.me/fan_world_me) [![Discord](https://img.shields.io/badge/Discord-fan__world__me-5865F2?style=flat-square&logo=discord)](https://discord.com/users/1040301536036786248) [![Portfolio](https://img.shields.io/badge/Portfolio-fan--world--me.github.io-00e5ff?style=flat-square&logo=githubpages&logoColor=white)](https://fan-world-me.github.io/)

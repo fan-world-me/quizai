@@ -412,6 +412,20 @@ function buildHTML(en, hasKey, settings) {
       <div class="__qhintv" id="__qfallback">${fallbackLabel}</div>
     </div>
 
+    <!-- Focus Guard banner — hidden by default, shown if not installed -->
+    <div id="__qfgbanner" style="display:none;align-items:center;gap:8px;padding:9px 11px;border-radius:10px;margin-bottom:8px;background:rgba(255,183,77,0.1);border:1.5px solid rgba(255,183,77,0.32);">
+      <span style="font-size:18px;flex:none;line-height:1;">🛡️</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:10px;font-weight:800;color:#FFB74D;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Vseosvita Focus Guard</div>
+        <div style="font-size:9px;color:rgba(255,183,77,0.7);line-height:1.4;margin-top:2px;">Для стабільної роботи на vseosvita.ua — встанови це розширення</div>
+      </div>
+      <a href="https://github.com/fan-world-me/vseosvita-focus-guard"
+         target="_blank" rel="noopener noreferrer"
+         style="flex:none;padding:5px 10px;border-radius:20px;background:rgba(255,183,77,0.18);border:1px solid rgba(255,183,77,0.4);color:#FFB74D;font-size:10px;font-weight:700;text-decoration:none;white-space:nowrap;">
+        Скачати
+      </a>
+    </div>
+
     <!-- Налаштування API -->
     <div class="__qsect">
       <div class="__qsecttoggle" id="__qsettoggle">
@@ -466,6 +480,47 @@ function buildHTML(en, hasKey, settings) {
       <div class="__qdiv"></div>
       <div class="__qhistory-title">Історія (останні 3)</div>
       <div id="__qhistory-list"></div>
+    </div>
+
+    <!-- Related projects -->
+    <div id="__qprojects_section">
+      <div class="__qdiv"></div>
+      <div style="font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(237,231,246,0.35);margin-bottom:6px;padding:0 2px;">Інші проєкти</div>
+
+      <a id="__qproj_vsg" href="https://github.com/fan-world-me/vseosvita-focus-guard"
+         target="_blank" rel="noopener noreferrer"
+         style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;margin-bottom:6px;background:rgba(124,77,255,0.08);border:1px solid rgba(124,77,255,0.22);text-decoration:none;transition:background .15s;">
+        <span style="font-size:18px;flex:none;line-height:1;">🛡️</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;font-weight:800;color:#EDE7F6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Vseosvita Focus Guard</div>
+          <div style="font-size:9px;color:rgba(237,231,246,0.5);line-height:1.4;margin-top:2px;">Нейтралізує перевірку вкладки на vseosvita.ua</div>
+        </div>
+        <span style="font-size:12px;color:#B39DDB;flex:none;opacity:.6;">→</span>
+      </a>
+
+      <a id="__qproj_moodle" href="https://github.com/fan-world-me/moodle-autoreconnect"
+         target="_blank" rel="noopener noreferrer"
+         style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:10px;margin-bottom:6px;background:rgba(124,77,255,0.08);border:1px solid rgba(124,77,255,0.22);text-decoration:none;transition:background .15s;">
+        <span style="font-size:18px;flex:none;line-height:1;">🔄</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:11px;font-weight:800;color:#EDE7F6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Moodle Auto Relogin</div>
+          <div style="font-size:9px;color:rgba(237,231,246,0.5);line-height:1.4;margin-top:2px;">Тримає сесію Moodle живою, автологін</div>
+        </div>
+        <span style="font-size:12px;color:#B39DDB;flex:none;opacity:.6;">→</span>
+      </a>
+    </div>
+
+    <div style="display:flex;gap:6px;padding-top:2px;padding-bottom:4px;">
+      <a href="https://fan-world-me.github.io/"
+         target="_blank" rel="noopener noreferrer"
+         style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px 8px;border-radius:20px;background:rgba(255,255,255,0.05);border:1px solid rgba(179,157,219,0.2);color:rgba(237,231,246,0.5);font-size:9px;font-weight:700;text-decoration:none;">
+        🌐 Сайт автора
+      </a>
+      <a href="https://github.com/fan-world-me"
+         target="_blank" rel="noopener noreferrer"
+         style="flex:1;display:flex;align-items:center;justify-content:center;gap:4px;padding:5px 8px;border-radius:20px;background:rgba(255,255,255,0.05);border:1px solid rgba(179,157,219,0.2);color:rgba(237,231,246,0.5);font-size:9px;font-weight:700;text-decoration:none;">
+        🐙 @fan-world-me
+      </a>
     </div>
 
   </div>

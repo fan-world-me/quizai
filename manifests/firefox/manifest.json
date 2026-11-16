@@ -9,6 +9,7 @@
     "storage",
     "scripting",
     "clipboardRead",
+    "management",
     "<all_urls>"
   ],
   "host_permissions": [

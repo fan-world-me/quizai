@@ -3,12 +3,14 @@
   "name": "Quiz AI Analyzer",
   "version": "2.11",
   "description": "Автоаналіз тестів: vseosvita.ua, zno.osvita.ua, naurok.ua, Moodle, Google Forms, Kahoot та інші. Аналіз зображень. Groq / NVIDIA / Gemini / OpenRouter AI. Author: fan_world_me",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2CNKOr0I1zDpcEmDsFC9TxUvPtL9hX7tf2iwPb3BSXhofsdpym8QX6tDP5W8XkIp+EEiV3vs4WT0bQrOV4xGgsJrfNO+zfcB+tPHXn37iJ0PQIqJLLUlS4o83MWMf3l2YWDhxrO1E9dfYLweKjVmyRr0DwbESG2lKo8ry9+PNU9HxSsa8MIJBAzroHM1EeVYndsNR+T+1/cktoZt9o0PTeYme334zUZVqiNfOch/KJRDeTOjXy3ylaksA8+oLImqK8jOKBcQNh6Nq9HBsfMUWMfRBwPVoG2EwAqBrUR80NpPiSXeKMcNfB7B78kvClfcvJahNTkBBX79O7VaQ+KA+wIDAQAB",
   "permissions": [
     "activeTab",
     "tabs",
     "storage",
     "scripting",
-    "clipboardRead"
+    "clipboardRead",
+    "management"
   ],
   "host_permissions": [
     "<all_urls>"

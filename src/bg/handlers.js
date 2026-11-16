@@ -49,6 +49,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleAnalyzeQuiz(message.data, sendResponse);
     return true;
   }
+  if (message.type === 'GET_INSTALLED_EXTENSIONS') {
+    if (chrome.management && chrome.management.getAll) {
+      chrome.management.getAll((exts) => {
+        if (chrome.runtime.lastError) { sendResponse([]); return; }
+        sendResponse(exts.filter(e => e.enabled).map(e => e.id));
+      });
+    } else {
+      sendResponse([]);
+    }
+    return true;
+  }
   if (message.type === 'GET_SETTINGS') {
     getSettings().then((settings) => {
       if (chrome.runtime.lastError) return;
